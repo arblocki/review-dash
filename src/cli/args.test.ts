@@ -38,10 +38,13 @@ describe('parseCli', () => {
     expect(parseCli(['--help'])).toBe('help');
   });
 
-  it.each([[[]], [['nope']], [['a/b#1', '--port', 'x']], [['a/b#1', '--bogus']]])(
-    'rejects %j',
-    (argv) => {
-      expect(() => parseCli(argv)).toThrow(UsageError);
-    },
-  );
+  it.each([
+    [[]],
+    [['nope']],
+    [['a/b#1', '--port', 'x']],
+    [['a/b#1', '--bogus']],
+    [['a/b#1', '--provider', 'gpt']],
+  ])('rejects %j', (argv) => {
+    expect(() => parseCli(argv)).toThrow(UsageError);
+  });
 });

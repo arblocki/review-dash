@@ -1,9 +1,10 @@
 import { parseArgs } from 'node:util';
+import { isProviderId, PROVIDER_IDS, type ProviderId } from '../core/llm/types.js';
 import { parsePrRef, type PrRef } from '../core/pr-ref.js';
 
 export interface CliOptions {
   pr: PrRef;
-  provider?: string;
+  provider?: ProviderId;
   model?: string;
   port?: number;
   open: boolean;
@@ -13,7 +14,7 @@ export interface CliOptions {
 export const USAGE = `Usage: review-dash <owner/repo#123 | https://github.com/owner/repo/pull/123> [options]
 
 Options:
-  --provider <name>  LLM provider
+  --provider <name>  LLM provider: claude-cli | codex-cli | openrouter
   --model <name>     LLM model
   --port <n>         Port to listen on (default: random free port)
   --no-open          Do not open the browser
@@ -55,9 +56,15 @@ export function parseCli(argv: string[]): CliOptions | 'help' {
     }
   }
 
+  if (values.provider !== undefined && !isProviderId(values.provider)) {
+    throw new UsageError(
+      `Invalid provider: ${values.provider} (expected one of ${PROVIDER_IDS.join(', ')})`,
+    );
+  }
+
   return {
     pr,
-    provider: values.provider,
+    provider: values.provider as ProviderId | undefined,
     model: values.model,
     port,
     open: !values['no-open'],
