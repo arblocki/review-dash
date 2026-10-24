@@ -1,0 +1,244 @@
+import { useEffect, useMemo, useState } from 'react';
+import { ApiError, api, jsonBody } from '../api';
+import { isInlineRange } from '../lib/diffModel';
+import { useDrafts, useReview } from '../state';
+import type { LineRange, SubmitEvent, SubmitResult } from '../types';
+
+type Phase =
+  | { kind: 'saving' }
+  | { kind: 'ready' }
+  | { kind: 'submitting' }
+  | { kind: 'head_moved'; event: SubmitEvent; currentHeadSha: string }
+  | { kind: 'error'; message: string }
+  | { kind: 'done'; result: SubmitResult };
+
+function rangeLabel(d: { line: number; startLine?: number }): string {
+  return d.startLine !== undefined && d.startLine !== d.line
+    ? `${d.startLine}-${d.line}`
+    : String(d.line);
+}
+
+export function SubmitModal({ onClose }: { onClose: () => void }) {
+  const { files, isSelfReview, flushDrafts, reloadAfterSubmit } = useReview();
+  const drafts = useDrafts();
+  const [body, setBody] = useState('');
+  const [phase, setPhase] = useState<Phase>({ kind: 'saving' });
+
+  // Make sure the server has the latest text of every draft before listing them.
+  useEffect(() => {
+    let cancelled = false;
+    flushDrafts().then(() => !cancelled && setPhase({ kind: 'ready' }));
+    return () => {
+      cancelled = true;
+    };
+  }, [flushDrafts]);
+
+  const items = useMemo(() => {
+    const byPath = new Map(files.map((f) => [f.path, f.hunks]));
+    return drafts
+      .filter((d) => d.body.trim() && d.persisted)
+      .map((d) => {
+        const range: LineRange = {
+          line: d.line,
+          side: d.side,
+          startLine: d.startLine,
+          startSide: d.startSide,
+        };
+        return { draft: d, inline: isInlineRange(byPath.get(d.path) ?? [], range) };
+      });
+  }, [drafts, files]);
+
+  async function submit(event: SubmitEvent, force = false) {
+    setPhase({ kind: 'submitting' });
+    try {
+      await flushDrafts();
+      const result = await api<SubmitResult>('/api/review', {
+        method: 'POST',
+        ...jsonBody({ event, body, ...(force ? { force: true } : {}) }),
+      });
+      await reloadAfterSubmit();
+      setPhase({ kind: 'done', result });
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'head_moved') {
+        setPhase({
+          kind: 'head_moved',
+          event,
+          currentHeadSha: String(err.body.currentHeadSha ?? ''),
+        });
+      } else {
+        setPhase({ kind: 'error', message: (err as Error).message });
+      }
+    }
+  }
+
+  const busy = phase.kind === 'saving' || phase.kind === 'submitting';
+  const done = phase.kind === 'done';
+  const fallbackCount = items.filter((i) => !i.inline).length;
+  const btn = 'rounded px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50';
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:pt-16"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Submit review"
+      onClick={(e) => e.target === e.currentTarget && !busy && onClose()}
+    >
+      <div className="w-full max-w-2xl rounded-lg border border-gray-200 bg-white p-4 shadow-xl dark:border-gray-700 dark:bg-gray-900">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Submit review</h2>
+          <button type="button" className="text-gray-500" aria-label="Close" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+
+        {done ? (
+          <div data-testid="submit-success">
+            <p className="text-green-700 dark:text-green-400">Review submitted.</p>
+            <p className="mt-1 text-sm">
+              <a
+                href={phase.result.reviewUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-blue-600 hover:underline dark:text-blue-400"
+              >
+                View the review on GitHub ↗
+              </a>
+            </p>
+            {phase.result.fallbacks.length > 0 && (
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                {phase.result.fallbacks.length} comment(s) outside the diff were added to the review
+                body.
+              </p>
+            )}
+            <div className="mt-4 text-right">
+              <button
+                type="button"
+                className="rounded border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700"
+                onClick={onClose}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <h3 className="text-xs font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400">
+              Drafts ({items.length})
+            </h3>
+            {items.length === 0 ? (
+              <p className="py-2 text-sm text-gray-500 dark:text-gray-400">No inline drafts.</p>
+            ) : (
+              <ul className="mt-1 max-h-64 space-y-1 overflow-y-auto">
+                {items.map(({ draft, inline }) => (
+                  <li
+                    key={draft.id}
+                    className="rounded border border-gray-200 p-2 text-sm dark:border-gray-700"
+                  >
+                    <div className="flex items-center gap-2 font-mono text-xs">
+                      <span className="min-w-0 flex-1 truncate">
+                        {draft.path}:{rangeLabel(draft)}
+                      </span>
+                      {!inline && (
+                        <span className="shrink-0 rounded bg-amber-100 px-1.5 font-sans text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
+                          goes in review body
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 whitespace-pre-wrap">{draft.body}</div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {fallbackCount > 0 && (
+              <p className="mt-2 text-xs text-amber-800 dark:text-amber-300">
+                {fallbackCount} comment(s) are outside the diff, so GitHub can&apos;t place them
+                inline. They are appended to the review body as <code>path:line — comment</code>.
+              </p>
+            )}
+
+            <label className="mt-3 block text-sm font-medium" htmlFor="review-body">
+              Review summary (optional)
+            </label>
+            <textarea
+              id="review-body"
+              value={body}
+              rows={4}
+              className="mt-1 w-full resize-y rounded border border-gray-300 bg-white p-2 text-sm dark:border-gray-700 dark:bg-gray-950"
+              onChange={(e) => setBody(e.target.value)}
+            />
+
+            {phase.kind === 'head_moved' && (
+              <div
+                className="mt-3 rounded border border-amber-400 bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+                data-testid="head-moved"
+              >
+                The PR head moved to <code>{phase.currentHeadSha.slice(0, 7)}</code> since some
+                drafts were written, so their line numbers may no longer match. Refresh and check
+                them, or submit anyway.
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    className={`${btn} bg-amber-600 hover:bg-amber-700`}
+                    onClick={() => void submit(phase.event, true)}
+                  >
+                    Submit anyway
+                  </button>
+                </div>
+              </div>
+            )}
+            {phase.kind === 'error' && (
+              <p className="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">
+                {phase.message}
+              </p>
+            )}
+
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                className="rounded border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700"
+                onClick={onClose}
+                disabled={phase.kind === 'submitting'}
+              >
+                Cancel
+              </button>
+              {!isSelfReview && (
+                <>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className={`${btn} bg-red-600 hover:bg-red-700`}
+                    onClick={() => void submit('REQUEST_CHANGES')}
+                  >
+                    Request changes
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className={`${btn} bg-green-600 hover:bg-green-700`}
+                    onClick={() => void submit('APPROVE')}
+                  >
+                    Approve
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                disabled={busy}
+                className={`${btn} bg-blue-600 hover:bg-blue-700`}
+                onClick={() => void submit('COMMENT')}
+              >
+                {phase.kind === 'submitting' ? 'Submitting…' : 'Comment'}
+              </button>
+            </div>
+            {isSelfReview && (
+              <p className="mt-2 text-right text-xs text-gray-500 dark:text-gray-400">
+                This is your own PR, so GitHub only allows submitting as a comment.
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

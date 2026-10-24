@@ -1,1 +1,131 @@
 @import 'tailwindcss';
+
+:root {
+  color-scheme: light dark;
+  --header-h: 56px;
+  --diff-font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --diff-background-color: #fff;
+  --diff-text-color: #1f2328;
+  --tok-comment: #6e7781;
+  --tok-keyword: #cf222e;
+  --tok-string: #0a3069;
+  --tok-number: #0550ae;
+  --tok-function: #8250df;
+  --tok-class: #953800;
+  --tok-punct: #57606a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --diff-background-color: #0d1117;
+    --diff-text-color: #e6edf3;
+    --diff-selection-background-color: #264f78;
+    --diff-gutter-insert-background-color: #12361f;
+    --diff-gutter-delete-background-color: #4a1d22;
+    --diff-gutter-selected-background-color: #4d4413;
+    --diff-code-insert-background-color: #0f2a19;
+    --diff-code-delete-background-color: #3a171b;
+    --diff-code-insert-edit-background-color: #1f6a35;
+    --diff-code-delete-edit-background-color: #8a2a33;
+    --diff-code-selected-background-color: #3b350f;
+    --diff-omit-gutter-line-color: #f85149;
+    --tok-comment: #8b949e;
+    --tok-keyword: #ff7b72;
+    --tok-string: #a5d6ff;
+    --tok-number: #79c0ff;
+    --tok-function: #d2a8ff;
+    --tok-class: #ffa657;
+    --tok-punct: #8b949e;
+  }
+}
+
+body {
+  background: #fff;
+  color: #1f2328;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+  }
+}
+
+/* Diff: dense, readable. */
+.rd-diff .diff-line {
+  line-height: 1.45;
+}
+.rd-diff .diff-gutter {
+  min-width: 3.5em;
+  color: #6e7781;
+  font-size: 11.5px;
+}
+.rd-diff .diff-gutter-col {
+  width: 4.5em;
+}
+.rd-diff .diff-decoration-content {
+  font-family: system-ui, sans-serif;
+}
+.rd-diff .diff-gutter .rd-add {
+  display: inline-block;
+  width: 1.4em;
+  border-radius: 3px;
+  background: #0969da;
+  color: #fff;
+  font-weight: 700;
+  text-align: center;
+}
+.rd-diff .diff-widget-content {
+  background: var(--diff-background-color);
+  white-space: normal;
+}
+.rd-diff .diff-widget-content > * {
+  white-space: normal;
+}
+
+/* Syntax tokens (refractor / Prism class names). */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: var(--tok-comment);
+}
+.token.keyword,
+.token.atrule,
+.token.boolean,
+.token.important,
+.token.selector {
+  color: var(--tok-keyword);
+}
+.token.string,
+.token.char,
+.token.attr-value,
+.token.regex,
+.token.url {
+  color: var(--tok-string);
+}
+.token.number,
+.token.constant,
+.token.symbol,
+.token.property,
+.token.attr-name {
+  color: var(--tok-number);
+}
+.token.function,
+.token.builtin {
+  color: var(--tok-function);
+}
+.token.class-name,
+.token.tag,
+.token.namespace {
+  color: var(--tok-class);
+}
+.token.punctuation,
+.token.operator {
+  color: var(--tok-punct);
+}
