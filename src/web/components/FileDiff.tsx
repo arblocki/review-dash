@@ -25,6 +25,7 @@ import {
 } from '../lib/diffModel';
 import { highlightHunks, languageForPath } from '../lib/highlight';
 import { placeThreads } from '../lib/threadPlacement';
+import { useFocusedHunk, useReviewState } from '../reviewState';
 import { useFileDraftAnchors, useReview } from '../state';
 import type { Hunk, ParsedFile, ReviewThread } from '../types';
 import { DraftComposer } from './DraftComposer';
@@ -127,6 +128,7 @@ export function FileDiff({
       className="scroll-mt-[calc(var(--header-h)+8px)] overflow-hidden rounded-md border border-gray-200 dark:border-gray-800"
       data-testid="file-diff"
       data-path={file.path}
+      data-hunk-ids={hunks.map((h) => h.id).join(' ')}
     >
       <div className="flex items-center gap-2 border-b border-gray-200 bg-gray-50 px-3 py-1.5 text-sm dark:border-gray-800 dark:bg-gray-900">
         <button
@@ -151,6 +153,7 @@ export function FileDiff({
             {file.status}
           </span>
         )}
+        {hunks.length > 0 && <HunkCheckbox ids={hunks.map((h) => h.id)} label="File reviewed" />}
         <span className="shrink-0 font-mono text-xs">
           <span className="text-green-700 dark:text-green-400">+{file.additions}</span>{' '}
           <span className="text-red-700 dark:text-red-400">−{file.deletions}</span>
@@ -366,6 +369,17 @@ const FileDiffBody = memo(function FileDiffBody({
 
   const trailing = source ? gapAfter(rdvHunks, source.length) : undefined;
 
+  // An expanded hunk can swallow its neighbour, so a bar covers every original hunk that
+  // starts inside it.
+  const idsIn = (r: (typeof rdvHunks)[number]) =>
+    hunks
+      .filter((h) =>
+        r.newLines === 0
+          ? h.newStart === r.newStart
+          : h.newStart >= r.newStart && h.newStart < r.newStart + r.newLines,
+      )
+      .map((h) => h.id);
+
   const renderHunks = (hs: typeof rdvHunks) =>
     hs.flatMap((hunk, i) => {
       const gap = gapBefore(hs, i);
@@ -376,6 +390,7 @@ const FileDiffBody = memo(function FileDiffBody({
           <ExpandBar
             hidden={gapSize(gap)}
             header={hunk.content}
+            hunkIds={idsIn(hunk)}
             onUp={up ? () => void expand((h) => gapBefore(h, i), 'up') : undefined}
             onDown={
               i > 0 && canExpand && expansionRange(gap, 'down', EXPAND_STEP, hidden)
@@ -449,23 +464,64 @@ function renderGutter({
   );
 }
 
+/** Reviewed checkbox for one or more hunks: checked once all are reviewed or auto-cleared. */
+function HunkCheckbox({ ids, label = 'Reviewed' }: { ids: string[]; label?: string }) {
+  const { status, setHunks } = useReviewState();
+  const statuses = ids.map(status);
+  const done = statuses.every((s) => s !== 'none');
+  const auto = done && statuses.every((s) => s === 'auto');
+  return (
+    <label
+      className={`flex shrink-0 cursor-pointer items-center gap-1 rounded px-1 font-sans text-xs ${
+        auto ? 'text-sky-700 dark:text-sky-300' : 'text-gray-600 dark:text-gray-300'
+      }`}
+      title={
+        auto ? 'Auto-cleared (not reviewed by you). Uncheck to review it yourself.' : undefined
+      }
+    >
+      <input
+        type="checkbox"
+        checked={done}
+        aria-label={label}
+        data-testid="hunk-reviewed"
+        data-state={auto ? 'auto' : done ? 'reviewed' : 'none'}
+        className={auto ? 'accent-sky-500' : 'accent-green-600'}
+        onChange={() => setHunks(ids, !done)}
+      />
+      {auto ? 'auto-cleared' : label.toLowerCase()}
+    </label>
+  );
+}
+
 function ExpandBar({
   hidden,
   header,
+  hunkIds,
   onUp,
   onDown,
   onAll,
 }: {
   hidden?: number;
   header?: string;
+  /** Hunks this bar sits above; adds the reviewed checkbox and keyboard focus ring. */
+  hunkIds?: string[];
   onUp?: () => void;
   onDown?: () => void;
   onAll?: () => void;
 }) {
   const b =
     'rounded px-1.5 py-0.5 text-blue-700 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/50';
+  const { hunkId: focused } = useFocusedHunk();
+  const isFocused = !!hunkIds && focused !== null && hunkIds.includes(focused);
   return (
-    <div className="flex items-center gap-1 bg-blue-50/70 px-2 py-0.5 font-sans text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+    <div
+      className={`flex scroll-mt-[calc(var(--header-h)+8px)] items-center gap-1 bg-blue-50/70 px-2 py-0.5 font-sans text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300 ${
+        isFocused ? 'ring-2 ring-blue-500 ring-inset' : ''
+      }`}
+      data-hunk-id={hunkIds?.join(' ')}
+      data-focused={isFocused ? 'true' : undefined}
+    >
+      {hunkIds && hunkIds.length > 0 && <HunkCheckbox ids={hunkIds} />}
       {onUp && (
         <button type="button" className={b} onClick={onUp}>
           ↑ Expand up

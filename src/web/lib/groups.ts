@@ -108,6 +108,14 @@ export function verifyId(groupKey: string, index: number, text: string): string 
   return `${groupKey}:${index}:${hash8(text)}`;
 }
 
+/** Inverse of `verifyId`. Group keys may contain ':' so index and hash come after the last two. */
+export function parseVerifyId(
+  id: string,
+): { groupKey: string; index: number; hash: string } | null {
+  const m = /^(.+):(\d+):([0-9a-f]{8})$/.exec(id);
+  return m ? { groupKey: m[1]!, index: Number(m[2]), hash: m[3]! } : null;
+}
+
 /** Number of hunks that actually exist in the PR (stale ids are ignored). */
 export function countKnownHunks(group: AnalysisGroup, hunks: Iterable<Hunk>): number {
   const known = new Set<string>();

@@ -4,12 +4,14 @@
  *
  *   pnpm demo [--port 5175] [--self]     (--self: viewer is the PR author)
  *   kill -USR2 <pid>                      simulate a push; Refresh in the UI shows it
+ *   DEMO_REREVIEW=1 pnpm demo            (seeds reviewed hunks at an older head, 2 new commits)
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseFile } from '../src/core/diff/parse.js';
 import type { RawFile } from '../src/core/diff/types.js';
 import type { ReviewThread } from '../src/core/github/types.js';
 import { configSchema } from '../src/core/llm/config.js';
@@ -152,7 +154,9 @@ function demoGrouping(prompt: string): string {
   });
 }
 
-export async function startDemo(opts: { port?: number; self?: boolean } = {}): Promise<Demo> {
+export async function startDemo(
+  opts: { port?: number; self?: boolean; rereview?: boolean } = {},
+): Promise<Demo> {
   const fx = loadFixture();
   const contents: Record<string, [string, string]> = {
     'src/greet.ts': [GREET_OLD, GREET_NEW],
@@ -178,7 +182,7 @@ export async function startDemo(opts: { port?: number; self?: boolean } = {}): P
   });
   github.fetchFileContent = async (_ref, path, sha) => {
     const pair = contents[path];
-    if (!pair) throw new Error(`no such file ${path}`);
+    if (!pair) throw Object.assign(new Error(`no such file ${path}`), { status: 404 });
     return sha === fx.pr.baseSha ? pair[0] : pair[1];
   };
   const thread = (
@@ -214,11 +218,39 @@ export async function startDemo(opts: { port?: number; self?: boolean } = {}): P
     thread('t3', false, 1, 'Can we compress this logo?', 'assets/logo.png'),
   ];
 
+  const prRef = { owner: 'octocat', repo: 'hello-world', number: 1 };
+  const store = openStore(':memory:');
+  if (opts.rereview) {
+    // The user reviewed the Python and test hunks at an older head; two commits landed since.
+    const oldHead = 'a'.repeat(40);
+    const ids = files
+      .filter((f) => /^(src\/util\.py|tests\/)/.test(f.filename))
+      .flatMap((f) => parseFile(f).hunks.map((h) => h.id));
+    store.markReviewed(prRef, ids, oldHead);
+    github.compare = {
+      commits: [
+        {
+          sha: 'b1b2b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b8b9b0',
+          message: 'Make the greeting prefix a variable',
+          author: 'octocat',
+          date: '2026-01-03T09:00:00Z',
+        },
+        {
+          sha: 'c1c2c3c4c5c6c7c8c9c0c1c2c3c4c5c6c7c8c9c0',
+          message: 'Add retries constant',
+          author: 'octocat',
+          date: '2026-01-03T10:00:00Z',
+        },
+      ],
+      files: ['src/greet.ts', 'README.md'],
+    };
+  }
+
   const server = await startServer({
-    pr: { owner: 'octocat', repo: 'hello-world', number: 1 },
+    pr: prRef,
     port: opts.port ?? 0,
     github,
-    store: openStore(':memory:'),
+    store,
     analysis: {
       config: configSchema.parse({ provider: 'openrouter' }),
       createProvider: () =>
@@ -249,6 +281,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const demo = await startDemo({
     port: portIdx >= 0 ? Number(process.argv[portIdx + 1]) : 5175,
     self: process.argv.includes('--self'),
+    rereview: process.env.DEMO_REREVIEW === '1',
   });
   console.log(`Demo (fake GitHub): ${demo.url}`);
   // Smoke tests: `kill -USR2 <pid>` simulates a push; click Refresh in the UI to pick it up.

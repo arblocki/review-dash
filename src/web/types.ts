@@ -36,6 +36,8 @@ export interface Draft {
   body: string;
   hunkId?: string;
   headSha: string;
+  /** The diff moved and the line no longer maps; goes into the review body. */
+  outdated: boolean;
   updatedAt: string;
   revision: number;
 }
@@ -74,6 +76,8 @@ export interface AnalysisResponse {
   /** The PR head and diff hash the analysis was computed for (absent from older servers). */
   headSha?: string;
   diffHash?: string;
+  /** Problem with .review-dash.yaml (it was ignored). */
+  configWarning?: string;
 }
 
 /** GET /api/providers */
@@ -81,4 +85,22 @@ export interface ProvidersResponse {
   current: { provider: string; model: string };
   available: string[];
   models: Record<string, string>;
+}
+
+/** GET /api/review-state */
+export interface ReviewStateResponse {
+  reviewedHunkIds: string[];
+  reviewedAt: Record<string, { reviewedAt: string; headSha: string }>;
+  verifyChecks: Record<string, number[]>;
+  lastReviewedHeadSha?: string;
+}
+
+/** GET /api/interdiff */
+export interface InterdiffResponse {
+  lastReviewedHeadSha: string | null;
+  currentHeadSha: string;
+  newCommits: { sha: string; message: string; author?: string | null; date?: string | null }[];
+  changedFiles: string[];
+  newHunkIds: string[];
+  compareAvailable: boolean;
 }

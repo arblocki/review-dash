@@ -3,6 +3,7 @@ import { ApiError, api, jsonBody } from '../api';
 import { classifyDraft } from '../lib/diffModel';
 import type { UnsyncedDraft } from '../lib/draftSync';
 import { runSubmit } from '../lib/submitFlow';
+import { useReviewState } from '../reviewState';
 import { useDrafts, useReview } from '../state';
 import type { LineRange, SubmitEvent, SubmitResult } from '../types';
 
@@ -25,10 +26,14 @@ function rangeLabel(d: { line: number; startLine?: number }): string {
 }
 
 export function SubmitModal({ onClose }: { onClose: () => void }) {
-  const { pr, files, isSelfReview, flushDrafts, reloadAfterSubmit } = useReview();
+  const { files, pr, isSelfReview, flushDrafts, reloadAfterSubmit, refresh, refreshing } =
+    useReview();
+  const { checkHead, reloadInterdiff } = useReviewState();
+  // Head on GitHub right now, if it differs from the one this page loaded (PLAN section 3).
+  const [liveHead, setLiveHead] = useState<string | null>(null);
   const drafts = useDrafts();
   const [body, setBody] = useState('');
-  const [refreshing, setRefreshing] = useState(false);
+  const [retryingRefresh, setRetryingRefresh] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: 'saving' });
 
   // Make sure the server has the latest text of every draft before listing them.
@@ -44,6 +49,14 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
     setPhase({ kind: 'saving' });
     setPhase(afterFlush(await flushDrafts()));
   }
+  useEffect(() => {
+    let cancelled = false;
+    void checkHead().then((sha) => !cancelled && setLiveHead(sha));
+    return () => {
+      cancelled = true;
+    };
+  }, [checkHead]);
+  const headMoved = liveHead !== null && liveHead !== pr.headSha;
 
   const items = useMemo(() => {
     const byPath = new Map(files.map((f) => [f.path, f.hunks]));
@@ -58,7 +71,10 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
         };
         return {
           draft: d,
-          kind: classifyDraft({ ...d, ...range }, pr.headSha, byPath.get(d.path) ?? []),
+          // Re-anchoring flags drafts whose line no longer fits the new diff as outdated.
+          kind: d.outdated
+            ? ('outdated' as const)
+            : classifyDraft({ ...d, ...range }, pr.headSha, byPath.get(d.path) ?? []),
         };
       });
   }, [drafts, files, pr.headSha]);
@@ -66,14 +82,14 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
   async function retryRefresh() {
     if (phase.kind !== 'done') return;
     const { result } = phase;
-    setRefreshing(true);
+    setRetryingRefresh(true);
     try {
       await reloadAfterSubmit();
       setPhase({ kind: 'done', result });
     } catch (err) {
       setPhase({ kind: 'done', result, refreshError: (err as Error).message });
     } finally {
-      setRefreshing(false);
+      setRetryingRefresh(false);
     }
   }
 
@@ -94,6 +110,7 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
         setPhase({ kind: 'unsynced', failed: outcome.failed });
         return;
       }
+      void reloadInterdiff(true);
       setPhase({ kind: 'done', result: outcome.result, refreshError: outcome.refreshError });
     } catch (err) {
       if (err instanceof ApiError && err.code === 'head_moved') {
@@ -109,6 +126,13 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
   }
 
   const busy = phase.kind === 'saving' || phase.kind === 'submitting' || phase.kind === 'unsynced';
+  // Unsynced drafts block submitting, not closing: the user may need to go fix them.
+  const closable = phase.kind !== 'saving' && phase.kind !== 'submitting';
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closable && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [closable, onClose]);
   const done = phase.kind === 'done';
   const fallbackCount = items.filter((i) => i.kind === 'fallback').length;
   const outdatedCount = items.filter((i) => i.kind === 'outdated').length;
@@ -120,7 +144,7 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
       role="dialog"
       aria-modal="true"
       aria-label="Submit review"
-      onClick={(e) => e.target === e.currentTarget && !busy && onClose()}
+      onClick={(e) => e.target === e.currentTarget && closable && onClose()}
     >
       <div className="w-full max-w-2xl rounded-lg border border-gray-200 bg-white p-4 shadow-xl dark:border-gray-700 dark:bg-gray-900">
         <div className="mb-3 flex items-center justify-between">
@@ -153,11 +177,11 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
                 <div className="mt-2">
                   <button
                     type="button"
-                    disabled={refreshing}
+                    disabled={retryingRefresh}
                     className={`${btn} bg-amber-600 hover:bg-amber-700`}
                     onClick={() => void retryRefresh()}
                   >
-                    {refreshing ? 'Refreshing…' : 'Retry refresh'}
+                    {retryingRefresh ? 'Refreshing…' : 'Retry refresh'}
                   </button>
                 </div>
               </div>
@@ -225,6 +249,26 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
                 {fallbackCount} comment(s) are outside the diff, so GitHub can&apos;t place them
                 inline. They are appended to the review body as <code>path:line — comment</code>.
               </p>
+            )}
+            {headMoved && (
+              <div
+                className="mt-3 rounded border border-amber-400 bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+                data-testid="head-moved-warning"
+              >
+                The PR head moved to <code>{liveHead.slice(0, 7)}</code> since this page loaded (
+                <code>{pr.headSha.slice(0, 7)}</code>). Refresh to see the new diff; drafts are
+                moved onto it, and the ones that no longer fit become outdated.
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    disabled={refreshing}
+                    className={`${btn} bg-amber-600 hover:bg-amber-700`}
+                    onClick={() => void refresh()}
+                  >
+                    {refreshing ? 'Refreshing…' : 'Refresh PR'}
+                  </button>
+                </div>
+              </div>
             )}
 
             {outdatedCount > 0 && (

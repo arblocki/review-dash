@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAnalysis } from '../analysis';
+import { HideReviewedToggle } from './ReReviewBanner';
 import { usageParts, VIEW_LABELS, type ViewMode } from '../lib/groups';
 
 const btn =
@@ -8,10 +9,19 @@ const input =
   'rounded border border-gray-300 bg-white px-1.5 py-1 text-sm dark:border-gray-700 dark:bg-gray-900';
 
 /** Second header row: view switcher, provider/model, Re-analyze, usage line, and PR summary. */
-export function AnalysisBar({ view, onView }: { view: ViewMode; onView(v: ViewMode): void }) {
+export function AnalysisBar({
+  view,
+  onView,
+  onHelp,
+}: {
+  view: ViewMode;
+  onView(v: ViewMode): void;
+  onHelp?: () => void;
+}) {
   const { result, stale, loading, elapsedS, providers, choice, setChoice, reanalyze } =
     useAnalysis();
   const [summaryOpen, setSummaryOpen] = useState(false);
+  const [dismissedWarning, setDismissedWarning] = useState<string | null>(null);
   // A stale analysis describes an older head; its summary and badges must not read as current.
   const analysis = stale ? undefined : result?.analysis;
 
@@ -75,6 +85,18 @@ export function AnalysisBar({ view, onView }: { view: ViewMode; onView(v: ViewMo
         <button type="button" className={btn} disabled={loading} onClick={reanalyze}>
           {loading ? `Analyzing… ${elapsedS}s` : 'Re-analyze'}
         </button>
+        <HideReviewedToggle />
+        {onHelp && (
+          <button
+            type="button"
+            className={btn}
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+            onClick={onHelp}
+          >
+            ?
+          </button>
+        )}
         {analysis && (
           <div className="flex flex-wrap items-center gap-x-2 text-xs text-gray-500 dark:text-gray-400">
             <span>{usageParts(analysis).join(' · ')}</span>
@@ -96,6 +118,23 @@ export function AnalysisBar({ view, onView }: { view: ViewMode; onView(v: ViewMo
           </div>
         )}
       </div>
+      {result?.configWarning && result.configWarning !== dismissedWarning && (
+        <div
+          className="mt-1 flex items-start gap-2 rounded bg-amber-50 px-2 py-1 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+          role="alert"
+          data-testid="config-warning"
+        >
+          <p className="min-w-0 flex-1">{result.configWarning}</p>
+          <button
+            type="button"
+            className="shrink-0 text-xs hover:underline"
+            aria-label="Dismiss warning"
+            onClick={() => setDismissedWarning(result.configWarning ?? null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {analysis?.summary && (
         <div className="mt-1 flex items-start gap-2 text-sm">
           <p

@@ -1,5 +1,13 @@
 import { useCallback, useMemo, useState } from 'react';
 import { AnalysisProvider, useAnalysis } from './analysis';
+import { hideWhitespaceOnly } from './lib/diffModel';
+import { sectionHunkIds } from './lib/reviewFilter';
+import { sectionsFromHunkIds } from './lib/sections';
+import { ReviewStateProvider, useReviewState, useVisibleSections } from './reviewState';
+import { useKeyboardNav } from './useKeyboardNav';
+import { HelpOverlay } from './components/HelpOverlay';
+import { ReReviewBanner } from './components/ReReviewBanner';
+import { fileAnchorId } from './components/FileDiff';
 import { AnalysisBar } from './components/AnalysisBar';
 import {
   AnalysisBanner,
@@ -22,13 +30,13 @@ import { fileThreadOwners } from './lib/sections';
 import { ReviewProvider, useReview } from './state';
 
 function Review() {
-  const { files, threadsError } = useReview();
+  const { files, threadsError, hideWhitespace } = useReview();
+  const { verifyChecked, toggleVerify, error: stateError, dismissError } = useReviewState();
   const { result, loading, error, stale } = useAnalysis();
   const [submitting, setSubmitting] = useState(false);
   const [choice, setChoice] = useState<ViewMode | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  // Verify checks are local for now; ids are `verifyId(groupKey, index, text)` so they can be persisted.
-  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const analysis = result?.analysis;
   // By group becomes the default as soon as an analysis exists; until then (or while the
@@ -49,15 +57,46 @@ function Review() {
     setSelectedKey(key);
     window.scrollTo({ top: 0 });
   }, []);
-  const toggleVerify = useCallback(
-    (id: string) =>
-      setChecked((prev) => {
-        const next = new Set(prev);
-        if (!next.delete(id)) next.add(id);
-        return next;
-      }),
-    [],
+
+  // Hunks on screen in display order, for j/k: the selected group, or every file in By file.
+  const navSections = useMemo(
+    () =>
+      view === 'file'
+        ? files.map((file) => ({ file, hunks: file.hunks, anchorId: fileAnchorId(file.path) }))
+        : group
+          ? sectionsFromHunkIds(files, group.hunkIds)
+          : [],
+    [view, files, group],
   );
+  const visibleNav = useVisibleSections(navSections);
+  const hunkIds = useMemo(
+    () =>
+      sectionHunkIds(
+        hideWhitespace
+          ? visibleNav.map((s) => ({ ...s, hunks: hideWhitespaceOnly(s.hunks) }))
+          : visibleNav,
+      ),
+    [visibleNav, hideWhitespace],
+  );
+  const { hideReviewed, reviewed } = useReviewState();
+  useKeyboardNav({
+    hunkIds,
+    groupKeys: view === 'file' ? [] : groups.map((g) => g.key),
+    selectedKey: group?.key,
+    selectGroup: select,
+    firstHunkOf: (key) => {
+      const g = groups.find((x) => x.key === key);
+      if (!g) return null;
+      const secs = sectionsFromHunkIds(files, g.hunkIds).map((s) => ({
+        ...s,
+        hunks: s.hunks.filter((h) => !(hideReviewed && reviewed.has(h.id))),
+      }));
+      return sectionHunkIds(secs)[0] ?? null;
+    },
+    modalOpen: submitting,
+    helpOpen,
+    setHelpOpen,
+  });
 
   const pane = mainPaneState({ loading, error, analysis, group, stale });
   let main;
@@ -81,7 +120,7 @@ function Review() {
           allGroups={analysis.groups}
           neighbors={groupNeighbors(groups, group.key)}
           fileThreadPaths={fileThreadPaths}
-          checked={checked}
+          checked={verifyChecked}
           onToggleVerify={toggleVerify}
           onSelect={select}
         />
@@ -106,7 +145,7 @@ function Review() {
         header={
           <Header
             onSubmit={() => setSubmitting(true)}
-            extra={<AnalysisBar view={view} onView={setChoice} />}
+            extra={<AnalysisBar view={view} onView={setChoice} onHelp={() => setHelpOpen(true)} />}
           />
         }
         rail={
@@ -129,11 +168,28 @@ function Review() {
                 Existing review threads could not be loaded: {threadsError}
               </p>
             )}
+            {stateError && (
+              <p
+                className="mb-3 flex items-start gap-2 rounded bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200"
+                role="alert"
+              >
+                <span className="min-w-0 flex-1">{stateError}</span>
+                <button
+                  type="button"
+                  className="shrink-0 text-xs hover:underline"
+                  onClick={dismissError}
+                >
+                  Dismiss
+                </button>
+              </p>
+            )}
+            <ReReviewBanner />
             {main}
           </>
         }
       />
       {submitting && <SubmitModal onClose={() => setSubmitting(false)} />}
+      {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
     </>
   );
 }
@@ -142,7 +198,9 @@ export function App() {
   return (
     <ReviewProvider>
       <AnalysisProvider>
-        <Review />
+        <ReviewStateProvider>
+          <Review />
+        </ReviewStateProvider>
       </AnalysisProvider>
     </ReviewProvider>
   );

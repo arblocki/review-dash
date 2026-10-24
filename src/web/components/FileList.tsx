@@ -1,6 +1,7 @@
 import { useDrafts, useReview } from '../state';
 import type { ParsedFile } from '../types';
 import { fileAnchorId } from './FileDiff';
+import { ProgressBar } from './ProgressBar';
 
 const STATUS: Record<string, { letter: string; cls: string }> = {
   added: { letter: 'A', cls: 'text-green-600 dark:text-green-400' },
@@ -61,6 +62,7 @@ export function FileList({ files }: { files: ParsedFile[] }) {
           );
         })}
       </ul>
+      <ProgressBar />
     </nav>
   );
 }

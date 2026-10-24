@@ -1,24 +1,19 @@
 import { useMemo, useState } from 'react';
-import {
-  groupByKey,
-  isFilesWithoutDiff,
-  itemCounts,
-  verifyId,
-  type GroupNeighbors,
-} from '../lib/groups';
+import { groupByKey, isFilesWithoutDiff, verifyId, type GroupNeighbors } from '../lib/groups';
+import { progressFor } from '../lib/progress';
 import { sectionsForGroup } from '../lib/sections';
+import { useReviewState, useVisibleSections } from '../reviewState';
 import { useReview } from '../state';
 import type { AnalysisGroup } from '../types';
-import { HunkList } from './HunkList';
+import { AllReviewed, countHunks, HunkList } from './HunkList';
 import { RiskBadge } from './RiskBadge';
 
 const stepBtn =
   'rounded border border-gray-300 bg-white px-2 py-0.5 text-sm hover:bg-gray-50 disabled:opacity-40 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800';
 
 /**
- * Main-pane card for one group. Mount with `key={group.key}` so collapse state resets per group.
- * Slots for the next layer: a progress count next to the title, a per-hunk reviewed checkbox in
- * the hunk list (FileDiff), and `checked`/`onToggleVerify` backed by persisted state.
+ * Main-pane card for one group, with its progress and a "Mark group reviewed" button. Mount with
+ * `key={group.key}` so collapse state resets per group.
  */
 export function GroupCard({
   group,
@@ -42,10 +37,17 @@ export function GroupCard({
 }) {
   const { files, pr } = useReview();
   const [expanded, setExpanded] = useState(!group.autoClear);
-  const sections = useMemo(() => sectionsForGroup(files, group), [files, group]);
+  const { knownHunkIds, status, setHunks } = useReviewState();
+  const all = useMemo(() => sectionsForGroup(files, group), [files, group]);
+  const sections = useVisibleSections(all);
+  const ids = useMemo(
+    () => group.hunkIds.filter((id) => knownHunkIds.has(id)),
+    [group, knownHunkIds],
+  );
+  const progress = progressFor(ids, status);
   const byKey = useMemo(() => groupByKey(allGroups), [allGroups]);
   const deps = group.dependsOn.map((k) => byKey.get(k)).filter((g): g is AnalysisGroup => !!g);
-  const shown = sections.reduce((n, s) => n + s.hunks.length, 0);
+  const shown = countHunks(sections);
   const shownFiles = sections.filter((s) => s.hunks.length === 0).length;
 
   return (
@@ -57,7 +59,6 @@ export function GroupCard({
           <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
             {group.kind}
           </span>
-          <span className="text-xs text-gray-500 dark:text-gray-400">{itemCounts(group)}</span>
           <div className="flex items-center gap-1 md:hidden" data-testid="group-stepper">
             <button
               type="button"
@@ -81,6 +82,24 @@ export function GroupCard({
               ›
             </button>
           </div>
+          <span className="text-xs text-gray-500 dark:text-gray-400" data-testid="card-progress">
+            {progress.complete && progress.total > 0 ? (
+              <span className="font-medium text-green-700 dark:text-green-400">
+                ✓ {progress.reviewed === 0 ? 'auto-cleared' : 'reviewed'} ·{' '}
+              </span>
+            ) : null}
+            {progress.done}/{progress.total} {progress.total === 1 ? 'hunk' : 'hunks'} reviewed
+            {progress.auto > 0 ? ` (${progress.auto} auto-cleared)` : ''}
+          </span>
+          {progress.total > 0 && (
+            <button
+              type="button"
+              className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800"
+              onClick={() => setHunks(ids, progress.reviewed !== progress.total)}
+            >
+              {progress.reviewed === progress.total ? 'Unmark group' : 'Mark group reviewed'}
+            </button>
+          )}
         </div>
         {group.intent && (
           <p className="mt-2 text-sm">
@@ -153,7 +172,9 @@ export function GroupCard({
         )}
       </div>
       <div className="mt-4">
-        {expanded ? (
+        {shown === 0 && all.length > 0 ? (
+          <AllReviewed count={countHunks(all)} />
+        ) : expanded ? (
           <>
             {group.autoClear && (
               <button

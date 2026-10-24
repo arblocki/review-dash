@@ -40,7 +40,19 @@ export function DraftComposer({ draftId, inline }: { draftId: string; inline: bo
         </span>
         <span data-testid="draft-status">{status}</span>
       </div>
-      {!inline && (
+      {draft.outdated && (
+        <p
+          className="mb-1 rounded bg-amber-100 px-2 py-1 text-xs text-amber-900 dark:bg-amber-900/40 dark:text-amber-200"
+          data-testid="draft-outdated"
+        >
+          <span className="mr-1 rounded bg-amber-300 px-1 font-semibold uppercase dark:bg-amber-700">
+            outdated
+          </span>
+          The code under this comment changed in a newer push. It will be added to the review body
+          as <code>path:line — comment</code> instead of inline.
+        </p>
+      )}
+      {!inline && !draft.outdated && (
         <p className="mb-1 rounded bg-amber-100 px-2 py-1 text-xs text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
           This line is outside the diff, so GitHub can't show it inline. The comment will be added
           to the review body as <code>path:line — comment</code>.

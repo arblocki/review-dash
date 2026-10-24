@@ -1,11 +1,14 @@
-import { itemCounts, railCount } from '../lib/groups';
+import { useMemo } from 'react';
+import { itemCounts } from '../lib/groups';
+import { groupProgress } from '../lib/progress';
+import { useReviewState } from '../reviewState';
 import type { AnalysisGroup } from '../types';
+import { ProgressBar } from './ProgressBar';
 import { RiskBadge } from './RiskBadge';
 
 /**
- * Left rail for the grouped views: one row per group. The `trailing` cell is where per-group
- * progress ("2/5" or a check) goes once reviewed-state exists; an overall progress bar belongs
- * at the bottom, below the list.
+ * Left rail for the grouped views: one row per group with its progress ("2/5", or a check when
+ * every hunk is reviewed or auto-cleared), and the overall progress bar below the list.
  */
 export function GroupRail({
   groups,
@@ -20,6 +23,11 @@ export function GroupRail({
   unrelated: string[];
   loading?: boolean;
 }) {
+  const { knownHunkIds, status } = useReviewState();
+  const progress = useMemo(
+    () => groupProgress(groups, knownHunkIds, status),
+    [groups, knownHunkIds, status],
+  );
   if (loading && groups.length === 0) {
     return (
       <div className="space-y-2 p-3" aria-label="Loading groups">
@@ -38,6 +46,7 @@ export function GroupRail({
         {groups.map((g) => {
           const selected = g.key === selectedKey;
           const muted = g.autoClear && !g.unclassified;
+          const p = progress.get(g.key);
           return (
             <li key={g.key}>
               <button
@@ -53,8 +62,29 @@ export function GroupRail({
                 <span className={`min-w-0 flex-1 truncate ${selected ? 'font-medium' : ''}`}>
                   {g.title}
                 </span>
-                <span className="shrink-0 font-mono text-xs text-gray-500 dark:text-gray-400">
-                  {railCount(g)}
+                <span
+                  className="shrink-0 font-mono text-xs text-gray-500 dark:text-gray-400"
+                  data-testid="group-progress"
+                  title={
+                    p
+                      ? `${p.reviewed} reviewed${p.auto ? `, ${p.auto} auto-cleared` : ''} of ${p.total} hunks`
+                      : undefined
+                  }
+                >
+                  {p?.complete ? (
+                    <span
+                      className={
+                        p.reviewed === 0
+                          ? 'text-sky-600 dark:text-sky-400'
+                          : 'font-bold text-green-600 dark:text-green-400'
+                      }
+                      aria-label={p.reviewed === 0 ? 'auto-cleared' : 'complete'}
+                    >
+                      ✓
+                    </span>
+                  ) : (
+                    `${p?.done ?? 0}/${p?.total ?? g.hunkIds.length}`
+                  )}
                 </span>
               </button>
             </li>
@@ -71,6 +101,7 @@ export function GroupRail({
           </ul>
         </div>
       )}
+      <ProgressBar />
     </nav>
   );
 }

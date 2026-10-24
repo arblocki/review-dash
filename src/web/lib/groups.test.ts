@@ -12,6 +12,7 @@ import {
   isFilesWithoutDiff,
   itemCounts,
   orderGroups,
+  parseVerifyId,
   pickGroup,
   railCount,
   resolveView,
@@ -200,5 +201,14 @@ describe('verifyId', () => {
     expect(hash8('')).toBe('811c9dc5');
     expect(hash8('a')).toBe('e40c292c');
     expect(hash8('foobar')).toBe('bf9cf968');
+  });
+});
+
+describe('parseVerifyId', () => {
+  it('round-trips verifyId, including colons in keys', () => {
+    const parsed = parseVerifyId(verifyId('a:b', 3, 'text'));
+    expect(parsed).toEqual({ groupKey: 'a:b', index: 3, hash: hash8('text') });
+    expect(parseVerifyId('nope')).toBeNull();
+    expect(parseVerifyId('k:x:abcd1234')).toBeNull();
   });
 });
