@@ -19,7 +19,8 @@
     "format": "prettier --write .",
     "typecheck": "tsc -p tsconfig.test.json && tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "test": "vitest run",
-    "llm:ping": "tsx scripts/llm-ping.ts"
+    "llm:ping": "tsx scripts/llm-ping.ts",
+    "eval": "tsx scripts/eval.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",

@@ -5,6 +5,7 @@ import { serve } from '@hono/node-server';
 import type { PrRef } from '../core/pr-ref.js';
 import type { GitHubClient } from '../core/github/types.js';
 import type { Store } from '../core/store/index.js';
+import type { AnalysisDeps } from './analysis.js';
 import { createApp } from './app.js';
 import { generateToken } from './security.js';
 
@@ -23,6 +24,7 @@ export function startServer(opts: {
   port?: number;
   github: GitHubClient;
   store: Store;
+  analysis?: AnalysisDeps;
 }): Promise<RunningServer> {
   const token = generateToken();
   let port = opts.port ?? 0;
@@ -31,6 +33,7 @@ export function startServer(opts: {
     pr: opts.pr,
     github: opts.github,
     store: opts.store,
+    analysis: opts.analysis,
     port: () => port,
     webDir: WEB_DIR,
   });

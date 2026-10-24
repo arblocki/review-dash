@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
 import type { Side } from '../diff/types.js';
+import type { Analysis } from '../group/types.js';
 import type { ReviewEvent } from '../github/types.js';
 import { formatPrRef, type PrRef } from '../pr-ref.js';
 import { MIGRATIONS } from './schema.js';
@@ -31,7 +32,19 @@ export interface SubmittedReviewRecord {
   githubReviewId: number | null;
 }
 
+/** Cache key (with repo + pr): see PLAN 4.8. */
+export interface AnalysisKey {
+  headSha: string;
+  diffHash: string;
+  provider: string;
+  model: string;
+  promptVersion: string;
+}
+
 export interface Store {
+  getAnalysis(ref: PrRef, key: AnalysisKey): Analysis | undefined;
+  /** Inserts or replaces the cached analysis for the key. */
+  saveAnalysis(ref: PrRef, key: AnalysisKey, analysis: Analysis): void;
   listDrafts(ref: PrRef): Draft[];
   /** Inserts or updates (by id) a draft; returns the stored row. */
   upsertDraft(ref: PrRef, input: DraftInput): Draft;
@@ -117,7 +130,48 @@ export function openStore(file: string): Store {
     INSERT INTO reviews_submitted (repo, pr, head_sha, github_review_id, event, submitted_at)
     VALUES (?, ?, ?, ?, ?, ?)`);
 
+  const getAnalysisRow = db.prepare<
+    [string, number, string, string, string, string, string],
+    { json: string }
+  >(
+    `SELECT json FROM analyses WHERE repo = ? AND pr = ? AND head_sha = ? AND diff_hash = ?
+     AND provider = ? AND model = ? AND prompt_version = ?`,
+  );
+  const putAnalysis = db.prepare(`
+    INSERT OR REPLACE INTO analyses (repo, pr, head_sha, diff_hash, provider, model, prompt_version, json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+
   return {
+    getAnalysis(ref, k) {
+      const row = getAnalysisRow.get(
+        `${ref.owner}/${ref.repo}`,
+        ref.number,
+        k.headSha,
+        k.diffHash,
+        k.provider,
+        k.model,
+        k.promptVersion,
+      );
+      if (!row) return undefined;
+      try {
+        return JSON.parse(row.json) as Analysis;
+      } catch {
+        return undefined; // corrupt row: treat as a miss
+      }
+    },
+    saveAnalysis(ref, k, analysis) {
+      putAnalysis.run(
+        `${ref.owner}/${ref.repo}`,
+        ref.number,
+        k.headSha,
+        k.diffHash,
+        k.provider,
+        k.model,
+        k.promptVersion,
+        JSON.stringify(analysis),
+        new Date().toISOString(),
+      );
+    },
     listDrafts(ref) {
       return list.all(`${ref.owner}/${ref.repo}`, ref.number).map(toDraft);
     },
