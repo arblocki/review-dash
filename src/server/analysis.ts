@@ -13,6 +13,7 @@ import {
 import type { GitHubClient } from '../core/github/types.js';
 import type { PrData } from '../core/pr-data.js';
 import type { PrRef } from '../core/pr-ref.js';
+import { loadRepoConfig, type LoadedRepoConfig } from '../core/risk/index.js';
 import type { Store } from '../core/store/index.js';
 
 export interface ProviderSelection {
@@ -62,6 +63,16 @@ function contextHash(pr: { title: string; body: string }): string {
 export function registerAnalysisApi(app: Hono, deps: RouteDeps): void {
   const { pr: ref, github, store, getData, analysis: a } = deps;
   const inflight = new Map<string, Promise<Analysis>>();
+  // The rules file is read once per head SHA.
+  const configs = new Map<string, Promise<LoadedRepoConfig>>();
+  const getConfig = (sha: string): Promise<LoadedRepoConfig> => {
+    let p = configs.get(sha);
+    if (!p) {
+      p = loadRepoConfig(github, ref, sha);
+      configs.set(sha, p);
+    }
+    return p;
+  };
 
   const selection = (query: { provider?: string; model?: string }): ProviderSelection | string => {
     const provider = query.provider || a.config.provider;
@@ -86,26 +97,33 @@ export function registerAnalysisApi(app: Hono, deps: RouteDeps): void {
 
     try {
       const data = await getData();
+      if (force) configs.delete(data.pr.headSha);
+      const repoConfig = await getConfig(data.pr.headSha);
+      const configWarning = repoConfig.warning;
+      const warn = configWarning ? { configWarning } : {};
+      // Editing .review-dash.yaml changes the key, so cached analyses are not reused.
       const key = {
         headSha: data.pr.headSha,
         // Folded into the existing key column to avoid a schema migration.
         diffHash: `${data.diffHash}+${contextHash(data.pr)}`,
         provider: sel.provider,
         model: sel.model,
-        promptVersion: PROMPT_VERSION,
+        promptVersion: repoConfig.hash
+          ? `${PROMPT_VERSION}+rules:${repoConfig.hash.slice(0, 12)}`
+          : PROMPT_VERSION,
       };
       // Which PR version this analysis describes, so the UI can tell when it has gone stale.
       const computedFor = { headSha: data.pr.headSha, diffHash: data.diffHash };
       if (!force) {
         const hit = store.getAnalysis(ref, key);
-        if (hit) return c.json({ analysis: hit, cached: true, ...computedFor });
+        if (hit) return c.json({ analysis: hit, cached: true, ...computedFor, ...warn });
       }
 
       const flightKey = JSON.stringify(key);
       let flight = inflight.get(flightKey);
       const shared = flight !== undefined;
       if (!flight) {
-        flight = runAnalysis(sel, data).then((result) => {
+        flight = runAnalysis(sel, data, repoConfig).then((result) => {
           // A fallback result is not cached: the next open should retry the model.
           if (!result.fallback) store.saveAnalysis(ref, key, result);
           return result;
@@ -114,14 +132,18 @@ export function registerAnalysisApi(app: Hono, deps: RouteDeps): void {
         const clear = () => inflight.delete(flightKey);
         flight.then(clear, clear);
       }
-      return c.json({ analysis: await flight, cached: false, shared, ...computedFor });
+      return c.json({ analysis: await flight, cached: false, shared, ...computedFor, ...warn });
     } catch (err) {
       const { status: code, code: kind } = status(err);
       return c.json({ error: (err as Error).message, code: kind }, code);
     }
   });
 
-  async function runAnalysis(sel: ProviderSelection, data: PrData): Promise<Analysis> {
+  async function runAnalysis(
+    sel: ProviderSelection,
+    data: PrData,
+    repoConfig: LoadedRepoConfig,
+  ): Promise<Analysis> {
     const provider = a.createProvider(sel);
     let mapProvider: LlmProvider | undefined;
     const mapId = a.config.mapProvider;
@@ -135,13 +157,17 @@ export function registerAnalysisApi(app: Hono, deps: RouteDeps): void {
     const reviewMd = await github
       .fetchFileContent(ref, 'REVIEW.md', data.pr.headSha)
       .catch(() => undefined);
+    const notes = repoConfig.notes
+      ? `# Repo risk notes (.review-dash.yaml)\n${repoConfig.notes}`
+      : undefined;
     return analyzePr({
       pr: { title: data.pr.title, body: data.pr.body },
       files: data.files,
       provider,
       model: sel.model,
       mapProvider,
-      reviewMd,
+      reviewMd: [reviewMd?.trim(), notes].filter(Boolean).join('\n\n') || undefined,
+      rules: repoConfig.rules,
       config: { maxConcurrency: a.config.maxConcurrency },
     });
   }

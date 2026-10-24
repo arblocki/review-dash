@@ -15,6 +15,7 @@ function draft(over: Partial<Draft>): Draft {
     line: 2,
     body: 'nit',
     headSha: HEAD,
+    outdated: false,
     updatedAt: '2026-01-01T00:00:00Z',
     revision: 1,
     ...over,
@@ -124,5 +125,27 @@ describe('buildReview', () => {
   it('refuses an empty review but allows a bare approval', () => {
     expect(() => buildReview(input({ drafts: [] }))).toThrow(/Nothing to submit/);
     expect(buildReview(input({ drafts: [], event: 'APPROVE' })).payload.comments).toEqual([]);
+  });
+
+  it('puts outdated drafts in the body with a note, never inline', () => {
+    const r = buildReview(
+      input({
+        drafts: [draft({ id: 'a' }), draft({ id: 'b', line: 3, outdated: true, headSha: 'old' })],
+      }),
+    );
+    expect(r.payload.comments.map((c) => c.line)).toEqual([2]);
+    expect(r.outdated.map((d) => d.id)).toEqual(['b']);
+    expect(r.fallbacks).toEqual([]);
+    expect(r.included.map((d) => d.id)).toEqual(['a', 'b']);
+    expect(r.payload.body).toContain('`src/greet.ts:3` (outdated');
+    expect(r.payload.body).toContain('— nit');
+  });
+
+  it('does not treat outdated drafts as stale head drafts', () => {
+    const r = buildReview(
+      input({ drafts: [draft({ outdated: true, headSha: 'old' })], body: 'x' }),
+    );
+    expect(r.payload.comments).toEqual([]);
+    expect(r.outdated).toHaveLength(1);
   });
 });

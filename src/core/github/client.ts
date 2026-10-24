@@ -232,6 +232,31 @@ export function createGitHubClient(deps: { rest: RestLike; gql: GraphqlLike }): 
       }));
     },
 
+    async compareCommits(ref, base, head) {
+      try {
+        const { data } = await rest.request('GET /repos/{owner}/{repo}/compare/{basehead}', {
+          owner: ref.owner,
+          repo: ref.repo,
+          basehead: `${base}...${head}`,
+          per_page: PER_PAGE,
+        });
+        const d = data as Json;
+        return {
+          commits: ((d.commits ?? []) as Json[]).map((c): PrCommit => ({
+            sha: c.sha,
+            message: c.commit?.message ?? '',
+            author: c.author?.login ?? c.commit?.author?.name ?? null,
+            date: c.commit?.author?.date ?? null,
+          })),
+          files: ((d.files ?? []) as Json[]).map((f) => f.filename as string),
+        };
+      } catch (err) {
+        const status = (err as { status?: unknown }).status;
+        if (status === 404 || status === 422) return undefined;
+        throw err;
+      }
+    },
+
     getViewerLogin() {
       viewer ??= rest.request('GET /user').then(({ data }) => (data as Json).login as string);
       viewer.catch(() => (viewer = undefined));

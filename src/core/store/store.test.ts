@@ -64,3 +64,59 @@ describe('store drafts', () => {
     expect(s.listDrafts(ref).map((d) => [d.id, d.body])).toEqual([[b.id, 'edited']]);
   });
 });
+
+describe('store review state', () => {
+  it('marks, lists and unmarks reviewed hunks per pull request', () => {
+    const s = openStore(':memory:');
+    s.markReviewed(ref, ['h1', 'h2'], 'sha1');
+    s.markReviewed(ref, ['h2', 'h3'], 'sha2'); // h2 keeps its original record
+    s.markReviewed(other, ['x'], 'sha9');
+    const list = s.listReviewed(ref);
+    expect(list.map((r) => r.hunkId).sort()).toEqual(['h1', 'h2', 'h3']);
+    expect(list.find((r) => r.hunkId === 'h2')?.headSha).toBe('sha1');
+    expect(list.find((r) => r.hunkId === 'h3')?.headSha).toBe('sha2');
+    s.unmarkReviewed(ref, ['h1', 'nope']);
+    expect(s.listReviewed(ref).map((r) => r.hunkId)).not.toContain('h1');
+    expect(s.listReviewed(other)).toHaveLength(1);
+  });
+
+  it('stores verify checks keyed by group and item', () => {
+    const s = openStore(':memory:');
+    s.setVerifyCheck(ref, 'g', 0, true);
+    s.setVerifyCheck(ref, 'g', 1, true);
+    s.setVerifyCheck(ref, 'g', 0, false);
+    expect(s.listVerifyChecks(ref)).toEqual([
+      { groupKey: 'g', itemIndex: 0, checked: false },
+      { groupKey: 'g', itemIndex: 1, checked: true },
+    ]);
+    expect(s.listVerifyChecks(other)).toEqual([]);
+  });
+
+  it('reports the head of the latest review activity', async () => {
+    const s = openStore(':memory:');
+    expect(s.getLastReviewedHeadSha(ref)).toBeUndefined();
+    s.markReviewed(ref, ['h1'], 'sha1');
+    expect(s.getLastReviewedHeadSha(ref)).toBe('sha1');
+    await new Promise((r) => setTimeout(r, 5));
+    s.recordSubmittedReview(ref, { headSha: 'sha2', event: 'COMMENT', githubReviewId: 1 });
+    expect(s.getLastReviewedHeadSha(ref)).toBe('sha2');
+    expect(s.getLastReviewedHeadSha(other)).toBeUndefined();
+  });
+
+  it('keeps anchors, and moves or outdates drafts', () => {
+    const s = openStore(':memory:');
+    const d = s.upsertDraft(ref, {
+      ...base,
+      hunkId: 'h',
+      startLine: 2,
+      anchor: { index: 4, startIndex: 3, text: 'x' },
+    });
+    expect(d).toMatchObject({ outdated: false, anchor: { index: 4, startIndex: 3, text: 'x' } });
+    s.moveDraft(ref, d.id, { line: 9, startLine: 8, headSha: 'new' });
+    expect(s.listDrafts(ref)[0]).toMatchObject({ line: 9, startLine: 8, headSha: 'new' });
+    s.markDraftOutdated(ref, d.id);
+    expect(s.listDrafts(ref)[0]?.outdated).toBe(true);
+    // Editing the draft makes it live again.
+    expect(s.upsertDraft(ref, { ...base, id: d.id }).outdated).toBe(false);
+  });
+});

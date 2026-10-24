@@ -1,0 +1,23 @@
+# Copy to .review-dash.yaml (or .review-dash.yml) at the root of the repo you review.
+# Read from the PR's head commit. Rules are added to the built-in ones; the final risk of a
+# group is the highest of the model's rating and every rule that fires.
+rules:
+  # A rule fires when any hunk in the group matches every condition it gives.
+  # `glob`: one pattern or a list, matched against the file path.
+  - glob: ['src/billing/**', 'src/payments/**']
+    risk: high
+    reason: Touches billing code
+  # `pattern`: a JavaScript regex tested against each added or removed line.
+  - pattern: 'process\.env\.'
+    risk: medium
+    reason: Reads environment configuration
+  # Both together: the file must match the glob and a changed line must match the pattern.
+  - glob: 'src/**/*.ts'
+    pattern: '\beval\('
+    risk: high
+    reason: Dynamic code execution
+
+# Free-form guidance for the grouping model, like REVIEW.md.
+notes: |
+  Retry and backoff logic is the riskiest area of this codebase.
+  Generated files under src/gen/ can be ignored.

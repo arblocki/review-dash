@@ -226,3 +226,78 @@ describe('GET /api/analysis', () => {
     expect(r.status).toBe(400);
   });
 });
+
+describe('GET /api/analysis with .review-dash.yaml', () => {
+  const rules = `
+rules:
+  - glob: 'src/greet.ts'
+    risk: high
+    reason: Greeting is sensitive
+notes: Mind the greetings
+`;
+
+  it('applies repo rules and notes, and re-runs when the file changes', async () => {
+    const p = new FakeProvider([reply, reply]);
+    const { get, github } = setup(() => p);
+    github.contents['.review-dash.yaml'] = rules;
+    const first = await get('/api/analysis');
+    expect(first.json.configWarning).toBeUndefined();
+    expect(first.json.analysis.groups[0]).toMatchObject({ risk: 'high' });
+    expect(first.json.analysis.groups[0].riskReasons).toContain('Greeting is sensitive');
+    expect(first.json.analysis.groups[0].riskReasons).toContain(
+      'Changes exported (public API) declarations',
+    );
+    expect(p.requests[0]!.prompt).toContain('Mind the greetings');
+    expect((await get('/api/analysis')).json.cached).toBe(true);
+  });
+
+  it('keys the cache on the rules file content', async () => {
+    // Two server runs (fresh config reads) sharing one store and one GitHub.
+    const github = fakeGitHub();
+    const store = openStore(':memory:');
+    const run = (provider: FakeProvider) =>
+      createApp({
+        token: 't',
+        pr,
+        port: () => PORT,
+        github,
+        store,
+        analysis: { config: configSchema.parse({}), createProvider: () => provider },
+      });
+    const fetchJson = async (app: ReturnType<typeof run>) =>
+      (
+        await app.request('/api/analysis', {
+          headers: { host: `127.0.0.1:${PORT}`, [TOKEN_HEADER]: 't' },
+        })
+      ).json() as Promise<Json>;
+
+    github.contents['.review-dash.yaml'] = rules;
+    const p1 = new FakeProvider([reply]);
+    const a = await fetchJson(run(p1));
+    expect(a.cached).toBe(false);
+    expect(a.analysis.groups[0].risk).toBe('high');
+
+    const p2 = new FakeProvider([reply]);
+    expect((await fetchJson(run(p2))).cached).toBe(true); // same file: reused
+
+    github.contents['.review-dash.yaml'] = rules.replace('high', 'medium');
+    const p3 = new FakeProvider([reply]);
+    const c = await fetchJson(run(p3));
+    expect(c.cached).toBe(false); // edited file: re-analyzed
+    expect(c.analysis.groups[0].risk).toBe('medium');
+    expect(p3.requests).toHaveLength(1);
+  });
+
+  it('runs with the built-ins and returns configWarning for an invalid file', async () => {
+    const p = new FakeProvider([reply]);
+    const { get, github } = setup(() => p);
+    github.contents['.review-dash.yaml'] = 'rules:\n  - {risk: nope}';
+    const r = await get('/api/analysis');
+    expect(r.status).toBe(200);
+    expect(r.json.configWarning).toMatch(/Ignoring \.review-dash\.yaml/);
+    expect(r.json.analysis.groups[0].risk).toBe('medium');
+    const cached = await get('/api/analysis');
+    expect(cached.json.cached).toBe(true);
+    expect(cached.json.configWarning).toMatch(/Ignoring/);
+  });
+});

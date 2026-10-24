@@ -1,6 +1,7 @@
 import type { Hunk, LineRange, Side } from './types.js';
 
-function indexOfLine(hunk: Hunk, side: Side, line: number): number {
+/** Index into `hunk.lines` of the line a comment on (side, line) would target, or -1. */
+export function indexOfLine(hunk: Hunk, side: Side, line: number): number {
   return hunk.lines.findIndex((l) =>
     side === 'RIGHT'
       ? (l.type === 'add' || l.type === 'context') && l.newLine === line

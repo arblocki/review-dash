@@ -224,3 +224,44 @@ describe('github client', () => {
     expect(seen).toMatchObject({ commit_id: 'h', event: 'COMMENT', pull_number: 1 });
   });
 });
+
+describe('github client compare', () => {
+  it('maps commits and files, and returns undefined on 404/422', async () => {
+    const calls: string[] = [];
+    const rest: RestLike = {
+      async request(route, params) {
+        calls.push(`${route} ${String(params?.basehead)}`);
+        if (params?.basehead === 'gone...new') {
+          throw Object.assign(new Error('Not Found'), { status: 404 });
+        }
+        if (params?.basehead === 'bad...new') {
+          throw Object.assign(new Error('Unprocessable'), { status: 422 });
+        }
+        if (params?.basehead === 'boom...new') {
+          throw Object.assign(new Error('boom'), { status: 500 });
+        }
+        return {
+          data: {
+            commits: [
+              {
+                sha: 'c1',
+                author: { login: 'octocat' },
+                commit: { message: 'fix', author: { name: 'O', date: '2026-01-01T00:00:00Z' } },
+              },
+            ],
+            files: [{ filename: 'a.ts' }, { filename: 'b.ts' }],
+          },
+        };
+      },
+    };
+    const gh = createGitHubClient({ rest, gql: noGql });
+    expect(await gh.compareCommits(ref, 'old', 'new')).toEqual({
+      commits: [{ sha: 'c1', message: 'fix', author: 'octocat', date: '2026-01-01T00:00:00Z' }],
+      files: ['a.ts', 'b.ts'],
+    });
+    expect(calls[0]).toBe('GET /repos/{owner}/{repo}/compare/{basehead} old...new');
+    expect(await gh.compareCommits(ref, 'gone', 'new')).toBeUndefined();
+    expect(await gh.compareCommits(ref, 'bad', 'new')).toBeUndefined();
+    await expect(gh.compareCommits(ref, 'boom', 'new')).rejects.toThrow('boom');
+  });
+});

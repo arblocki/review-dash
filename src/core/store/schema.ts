@@ -61,4 +61,12 @@ export const MIGRATIONS: readonly string[] = [
   `,
   // Monotonic per-draft counter: updated_at is millisecond-resolution, so two saves can tie.
   `ALTER TABLE drafts ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;`,
+  // M3: re-anchoring. `outdated` drafts no longer map onto the diff; the anchor records
+  // where the commented line sat inside its hunk (index into hunk.lines) and its text.
+  `
+  ALTER TABLE drafts ADD COLUMN outdated INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE drafts ADD COLUMN anchor_index INTEGER;
+  ALTER TABLE drafts ADD COLUMN anchor_start_index INTEGER;
+  ALTER TABLE drafts ADD COLUMN anchor_text TEXT;
+  `,
 ];

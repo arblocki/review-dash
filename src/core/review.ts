@@ -56,7 +56,8 @@ export function buildReview(input: BuildReviewInput): BuiltReview {
   }
 
   // Checked even with no drafts: a bare approval must not land on commits nobody looked at.
-  const stale = drafts.filter((d) => d.headSha !== currentHeadSha);
+  // Outdated drafts never go inline, so they do not block submission.
+  const stale = drafts.filter((d) => !d.outdated && d.headSha !== currentHeadSha);
   if ((input.reviewedHeadSha !== currentHeadSha || stale.length > 0) && !input.force) {
     throw new ReviewError(
       'head_moved',
@@ -77,8 +78,8 @@ export function buildReview(input: BuildReviewInput): BuiltReview {
   const outdated: Draft[] = [];
   for (const d of drafts) {
     // `force` only means "submit deliberately": it must not reuse line numbers from another head.
-    // A later layer that re-anchors a draft updates its headSha, which makes it inline again.
-    if (d.headSha !== currentHeadSha) {
+    // Re-anchored drafts carry the current headSha; ones that could not follow are `outdated`.
+    if (d.outdated || d.headSha !== currentHeadSha) {
       outdated.push(d);
       continue;
     }
