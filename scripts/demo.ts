@@ -11,6 +11,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { RawFile } from '../src/core/diff/types.js';
 import type { ReviewThread } from '../src/core/github/types.js';
+import { configSchema } from '../src/core/llm/config.js';
+import { FakeProvider } from '../src/core/llm/fake.js';
 import { openStore } from '../src/core/store/index.js';
 import { fakeGitHub, loadFixture, type FakeGitHub } from '../src/core/testing/fakes.testutil.js';
 import { startServer, type RunningServer } from '../src/server/index.js';
@@ -46,6 +48,11 @@ const GREET_NEW = GREET_OLD.replace(
 const UTIL_OLD = 'def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n';
 const UTIL_NEW =
   'def add(a, b):\n    """Add."""\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n\n\ndef mul(a, b):\n    return a * b\n';
+
+const TEST_OLD =
+  "import { greet } from '../src/greet';\n\ntest('greets', () => {\n  expect(greet('a')).toBe('Hello a');\n});\n";
+const TEST_NEW =
+  TEST_OLD + "\ntest('greets twice', () => {\n  expect(greet('b')).toBe('Hello b');\n});\n";
 
 const README_OLD = numbered(30, (i) => `Line ${i} of the readme`);
 const README_NEW = README_OLD.replace(
@@ -95,12 +102,60 @@ export interface Demo {
   close(): Promise<void>;
 }
 
+/** Canned grouping so the demo shows real groups without an LLM: one group per source area. */
+function demoGrouping(prompt: string): string {
+  const hunks = [...prompt.matchAll(/## hunk (\S+)\npath: (\S+)/g)].map((m) => ({
+    id: m[1]!,
+    path: m[2]!,
+  }));
+  const ids = (re: RegExp) => hunks.filter((h) => re.test(h.path)).map((h) => h.id);
+  const groups = [
+    {
+      title: 'Greeting prefix and retry constant',
+      intent: 'Makes the greeting prefix a variable and adds a retries export.',
+      kind: 'feature',
+      risk: 'high',
+      risk_reasons: ['Changes the public greet() output path', 'New exported constant'],
+      verify: ['greet() output is unchanged for existing callers', 'retries is not shadowed'],
+      hunk_ids: ids(/^src\/greet\.ts$/),
+      depends_on: [1],
+    },
+    {
+      title: 'Math helpers',
+      intent: 'Documents add() and introduces mul().',
+      kind: 'feature',
+      risk: 'low',
+      risk_reasons: [],
+      verify: ['mul() has the same signature style as add()'],
+      hunk_ids: ids(/^src\/util\.py$/),
+      depends_on: [],
+    },
+    {
+      title: 'Tests for greet',
+      intent: 'Adds a second greet test.',
+      kind: 'test',
+      risk: 'low',
+      risk_reasons: [],
+      verify: [],
+      hunk_ids: ids(/^tests\//),
+      depends_on: [0],
+    },
+  ].filter((g) => g.hunk_ids.length > 0);
+  return JSON.stringify({
+    summary:
+      'Refactors greet() to use a prefix variable, adds a retries constant and a mul() helper, and extends the tests.',
+    groups,
+    unrelated_or_suspicious: ['README.md whitespace edits look unrelated to the code changes.'],
+  });
+}
+
 export async function startDemo(opts: { port?: number; self?: boolean } = {}): Promise<Demo> {
   const fx = loadFixture();
   const contents: Record<string, [string, string]> = {
     'src/greet.ts': [GREET_OLD, GREET_NEW],
     'src/util.py': [UTIL_OLD, UTIL_NEW],
     'README.md': [README_OLD, README_NEW],
+    'tests/greet.test.ts': [TEST_OLD, TEST_NEW],
   };
   const files: RawFile[] = [
     ...Object.entries(contents).map(([p, [o, n]]) => file(p, o, n)),
@@ -161,6 +216,14 @@ export async function startDemo(opts: { port?: number; self?: boolean } = {}): P
     port: opts.port ?? 0,
     github,
     store: openStore(':memory:'),
+    analysis: {
+      config: configSchema.parse({ provider: 'openrouter' }),
+      createProvider: () =>
+        new FakeProvider(
+          Array.from({ length: 50 }, () => (req) => demoGrouping(req.prompt)),
+          'fake',
+        ),
+    },
   });
   return {
     server,

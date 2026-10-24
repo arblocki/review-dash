@@ -1,19 +1,100 @@
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { AnalysisProvider, useAnalysis } from './analysis';
+import { AnalysisBar } from './components/AnalysisBar';
+import { AnalysisBanner, AnalysisError, AnalysisSkeleton } from './components/AnalysisStatus';
 import { FileList } from './components/FileList';
+import { GroupCard } from './components/GroupCard';
+import { GroupRail } from './components/GroupRail';
 import { AllFilesDiff } from './components/HunkList';
 import { Header } from './components/Header';
 import { Layout } from './components/Layout';
 import { SubmitModal } from './components/SubmitModal';
+import { orderGroups, pickGroup, type ViewMode } from './lib/groups';
 import { ReviewProvider, useReview } from './state';
 
 function Review() {
   const { files, threadsError } = useReview();
+  const { result, loading, error } = useAnalysis();
   const [submitting, setSubmitting] = useState(false);
+  const [choice, setChoice] = useState<ViewMode | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // Verify checks are local for now; ids are `verifyId(groupKey, index)` so they can be persisted.
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+
+  const analysis = result?.analysis;
+  // By group becomes the default as soon as an analysis exists; until then the M1 view shows.
+  const view: ViewMode = choice ?? (analysis ? 'group' : 'file');
+  const groups = useMemo(
+    () => (analysis ? orderGroups(analysis.groups, view) : []),
+    [analysis, view],
+  );
+  const group = pickGroup(groups, selectedKey);
+
+  const select = useCallback((key: string) => {
+    setSelectedKey(key);
+    window.scrollTo({ top: 0 });
+  }, []);
+  const toggleVerify = useCallback(
+    (id: string) =>
+      setChecked((prev) => {
+        const next = new Set(prev);
+        if (!next.delete(id)) next.add(id);
+        return next;
+      }),
+    [],
+  );
+
+  let main;
+  if (view === 'file') {
+    main = (
+      <>
+        <AnalysisBanner />
+        {error && !loading && <AnalysisError view={view} onView={setChoice} />}
+        <AllFilesDiff />
+      </>
+    );
+  } else if (group && analysis) {
+    main = (
+      <>
+        {error && !loading && <AnalysisError view={view} onView={setChoice} />}
+        <GroupCard
+          key={group.key}
+          group={group}
+          allGroups={analysis.groups}
+          checked={checked}
+          onToggleVerify={toggleVerify}
+          onSelect={select}
+        />
+      </>
+    );
+  } else if (error && !loading) {
+    main = <AnalysisError view={view} onView={setChoice} />;
+  } else {
+    main = <AnalysisSkeleton />;
+  }
+
   return (
     <>
       <Layout
-        header={<Header onSubmit={() => setSubmitting(true)} />}
-        rail={<FileList files={files} />}
+        header={
+          <Header
+            onSubmit={() => setSubmitting(true)}
+            extra={<AnalysisBar view={view} onView={setChoice} />}
+          />
+        }
+        rail={
+          view === 'file' ? (
+            <FileList files={files} />
+          ) : (
+            <GroupRail
+              groups={groups}
+              selectedKey={group?.key}
+              onSelect={select}
+              unrelated={analysis?.unrelatedOrSuspicious ?? []}
+              loading={loading}
+            />
+          )
+        }
         main={
           <>
             {threadsError && (
@@ -21,7 +102,7 @@ function Review() {
                 Existing review threads could not be loaded: {threadsError}
               </p>
             )}
-            <AllFilesDiff />
+            {main}
           </>
         }
       />
@@ -33,7 +114,9 @@ function Review() {
 export function App() {
   return (
     <ReviewProvider>
-      <Review />
+      <AnalysisProvider>
+        <Review />
+      </AnalysisProvider>
     </ReviewProvider>
   );
 }
