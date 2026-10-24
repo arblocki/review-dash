@@ -2,11 +2,16 @@ import { readFileSync } from 'node:fs';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { formatPrRef, type PrRef } from '../core/pr-ref.js';
+import type { GitHubClient } from '../core/github/types.js';
+import type { Store } from '../core/store/index.js';
+import { registerApi } from './api.js';
 import { hostGuard, tokenGuard } from './security.js';
 
 export interface AppOptions {
   token: string;
   pr: PrRef;
+  github: GitHubClient;
+  store: Store;
   /** Port the server listens on; used for Host/Origin checks. May be set after listen(). */
   port: () => number;
   /** Directory containing the built UI. Omit to skip static serving. */
@@ -21,6 +26,7 @@ export function createApp(opts: AppOptions): Hono {
 
   app.get('/api/health', (c) => c.json({ ok: true }));
   app.get('/api/session', (c) => c.json({ pr: opts.pr, label: formatPrRef(opts.pr) }));
+  registerApi(app, { pr: opts.pr, github: opts.github, store: opts.store });
   app.all('/api/*', (c) => c.json({ error: 'not found' }, 404));
 
   const { webDir } = opts;

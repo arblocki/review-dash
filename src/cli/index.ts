@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import 'dotenv/config';
 import open from 'open';
+import { dbPath } from '../core/paths.js';
+import { createGitHubClient, createOctokitClients } from '../core/github/client.js';
+import { resolveToken } from '../core/github/token.js';
+import { openStore } from '../core/store/index.js';
 import { formatPrRef } from '../core/pr-ref.js';
 import { startServer } from '../server/index.js';
 import { parseCli, UsageError, USAGE } from './args.js';
@@ -20,7 +24,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  const server = await startServer({ pr: opts.pr, port: opts.port });
+  const github = createGitHubClient(createOctokitClients(await resolveToken()));
+  const store = openStore(dbPath());
+  const server = await startServer({ pr: opts.pr, port: opts.port, github, store });
   const url = `http://127.0.0.1:${server.port}/#token=${server.token}`;
   console.log(`Reviewing ${formatPrRef(opts.pr)}`);
   if (opts.open) {
@@ -31,7 +37,11 @@ async function main(): Promise<void> {
     console.log('Note: this URL contains a session token; do not share or log it.');
   }
 
-  const shutdown = () => void server.close().then(() => process.exit(0));
+  const shutdown = () =>
+    void server.close().then(() => {
+      store.close();
+      process.exit(0);
+    });
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }

@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
 import { serve } from '@hono/node-server';
 import type { PrRef } from '../core/pr-ref.js';
+import type { GitHubClient } from '../core/github/types.js';
+import type { Store } from '../core/store/index.js';
 import { createApp } from './app.js';
 import { generateToken } from './security.js';
 
@@ -16,12 +18,19 @@ export interface RunningServer {
 const WEB_DIR = resolve(fileURLToPath(import.meta.url), '../../../dist/web');
 
 /** Starts the server on 127.0.0.1. Port 0 picks a random free port. */
-export function startServer(opts: { pr: PrRef; port?: number }): Promise<RunningServer> {
+export function startServer(opts: {
+  pr: PrRef;
+  port?: number;
+  github: GitHubClient;
+  store: Store;
+}): Promise<RunningServer> {
   const token = generateToken();
   let port = opts.port ?? 0;
   const app = createApp({
     token,
     pr: opts.pr,
+    github: opts.github,
+    store: opts.store,
     port: () => port,
     webDir: WEB_DIR,
   });

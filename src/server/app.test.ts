@@ -2,13 +2,21 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { fakeGitHub } from '../core/testing/fakes.testutil.js';
+import { openStore } from '../core/store/index.js';
 import { createApp } from './app.js';
 import { TOKEN_HEADER } from './security.js';
 
 const TOKEN = 'test-token';
 const PORT = 4321;
 const pr = { owner: 'octocat', repo: 'hello-world', number: 1 };
-const app = createApp({ token: TOKEN, pr, port: () => PORT });
+const app = createApp({
+  token: TOKEN,
+  pr,
+  port: () => PORT,
+  github: fakeGitHub(),
+  store: openStore(':memory:'),
+});
 
 function get(path: string, headers: Record<string, string> = {}) {
   return app.request(path, {
