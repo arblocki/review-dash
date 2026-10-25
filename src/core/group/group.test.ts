@@ -5,18 +5,21 @@ import { FakeProvider } from '../llm/fake.js';
 import { LlmError } from '../llm/types.js';
 import { analyzePr } from './analyze.js';
 import { mkFile } from './files.testutil.js';
+import { applyRisk } from '../risk/apply.js';
 import { orderGroups } from './order.js';
 import { preGroup } from './pregroup.js';
 import { buildGroupingPrompt, groupingOutputSchema, type GroupingOutput } from './prompt.js';
 import { MECHANICAL_TITLE, UNCLASSIFIED_TITLE, type Analysis, type DraftGroup } from './types.js';
 import { UnionFind } from './union-find.js';
 import { validateGrouping } from './validate.js';
+import { LOCKFILE_TITLE } from './types.js';
 
 const FILES: ParsedFile[] = [
   mkFile('src/send.ts', [['-a', '+b'], ['+c']]),
   mkFile('src/send.test.ts', ['+test()']),
   mkFile('src/util.ts', ['+u']),
   mkFile('docs/guide.md', ['+hello']),
+  mkFile('package.json', ['+"dep": "1"']),
   mkFile('package-lock.json', ['+lock']),
   mkFile('src/gen.ts', ['-  a  b', '+a b']),
   mkFile('README.md', ['+x']),
@@ -261,8 +264,13 @@ describe('analyzePr', () => {
         const ids = idsFromPrompt(req.prompt);
         return JSON.stringify(
           out([
-            { title: 'Docs', kind: 'docs', risk: 'low', hunk_ids: ids.slice(4) },
-            { title: 'Code', risk: 'low', hunk_ids: ids.slice(0, 4), depends_on: [0] },
+            { title: 'Docs', kind: 'docs', risk: 'low', hunk_ids: [ids[4]!, ids[6]!] },
+            {
+              title: 'Code',
+              risk: 'low',
+              hunk_ids: [...ids.slice(0, 4), ids[5]!],
+              depends_on: [0],
+            },
           ]),
         );
       },
@@ -329,7 +337,7 @@ describe('analyzePr', () => {
     const provider = new FakeProvider([]);
     const a = await analyzePr({
       ...base,
-      files: [mkFile('package-lock.json', ['+x'])],
+      files: [mkFile('src/__snapshots__/a.snap', ['+x'])],
       provider,
     });
     expect(provider.requests).toHaveLength(0);
@@ -402,5 +410,88 @@ describe('analyzePr', () => {
     ]);
     const a: Analysis = await analyzePr({ ...base, provider });
     expect(a.usage).toEqual({ inputTokens: 30, outputTokens: 3, costUsd: 0.75 });
+  });
+});
+
+describe('lockfile handling', () => {
+  const run = (files: ParsedFile[]) => {
+    const c = classifyFiles(files);
+    const r = validateGrouping(
+      undefined,
+      c,
+      files.map((f) => f.path),
+    );
+    assertInvariant(r.groups, c);
+    const ordered = orderGroups(
+      r.groups.map((g) => applyRisk(g, new Map(c.map((h) => [h.hunk.id, h])))),
+      new Map(c.map((h) => [h.hunk.id, h])),
+    );
+    return ordered;
+  };
+  const find = (gs: ReturnType<typeof run>, t: string) => gs.find((g) => g.title === t);
+  const bump = ['-    "version": "1.0.0",', '+    "version": "1.0.1",'];
+
+  it('keeps lockfile + manifest in the mechanical group', () => {
+    const gs = run([mkFile('package.json', ['+x']), mkFile('package-lock.json', bump)]);
+    expect(find(gs, MECHANICAL_TITLE)).toMatchObject({ autoClear: true, risk: 'low' });
+    expect(find(gs, LOCKFILE_TITLE)).toBeUndefined();
+  });
+
+  it('flags a lockfile without its manifest as medium, not auto-cleared', () => {
+    const gs = run([mkFile('src/a.ts', ['+x']), mkFile('package-lock.json', bump)]);
+    const g = find(gs, LOCKFILE_TITLE)!;
+    expect(g).toMatchObject({ risk: 'medium', autoClear: false });
+    expect(g.riskReasons).toEqual([
+      'Lockfile changed without a matching manifest change (package.json)',
+    ]);
+    expect(find(gs, MECHANICAL_TITLE)).toBeUndefined();
+  });
+
+  it('flags integrity change without a version change as high, even with a manifest', () => {
+    const gs = run([
+      mkFile('package.json', ['+x']),
+      mkFile('package-lock.json', [
+        '-      "integrity": "sha512-aaa",',
+        '+      "integrity": "sha512-bbb",',
+      ]),
+    ]);
+    expect(find(gs, LOCKFILE_TITLE)).toMatchObject({
+      risk: 'high',
+      autoClear: false,
+      riskReasons: ['Integrity hash or resolved source changed without a version change'],
+    });
+    expect(gs[0]!.title).toBe(LOCKFILE_TITLE);
+  });
+
+  it('treats a version bump with an integrity change as mechanical', () => {
+    const gs = run([
+      mkFile('package.json', ['+x']),
+      mkFile('package-lock.json', [
+        ...bump,
+        '-      "integrity": "sha512-aaa",',
+        '+      "integrity": "sha512-bbb",',
+      ]),
+    ]);
+    expect(find(gs, MECHANICAL_TITLE)).toMatchObject({ autoClear: true });
+    expect(find(gs, LOCKFILE_TITLE)).toBeUndefined();
+  });
+
+  it('matches nested manifests by directory and root lockfiles to any manifest', () => {
+    const nested = run([
+      mkFile('packages/a/package.json', ['+x']),
+      mkFile('packages/a/package-lock.json', bump),
+    ]);
+    expect(find(nested, LOCKFILE_TITLE)).toBeUndefined();
+    const wrongDir = run([
+      mkFile('packages/b/package.json', ['+x']),
+      mkFile('packages/a/package-lock.json', bump),
+    ]);
+    expect(find(wrongDir, LOCKFILE_TITLE)!.riskReasons[0]).toContain('packages/a/package.json');
+    const root = run([mkFile('packages/b/package.json', ['+x']), mkFile('pnpm-lock.yaml', bump)]);
+    expect(find(root, LOCKFILE_TITLE)).toBeUndefined();
+    const cargo = run([mkFile('Cargo.toml', ['+x']), mkFile('Cargo.lock', bump)]);
+    expect(find(cargo, LOCKFILE_TITLE)).toBeUndefined();
+    const goSum = run([mkFile('main.go', ['+x']), mkFile('go.sum', ['+a v1 h1:x'])]);
+    expect(find(goSum, LOCKFILE_TITLE)!.riskReasons[0]).toContain('go.mod');
   });
 });

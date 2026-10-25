@@ -161,7 +161,11 @@ export async function analyzePr(input: AnalyzeInput): Promise<Analysis> {
     }
   }
 
-  const validated = validateGrouping(step?.output, classified);
+  const validated = validateGrouping(
+    step?.output,
+    classified,
+    input.files.map((f) => f.path),
+  );
   const rules = input.rules ?? BUILTIN_RULES;
   const finalized = validated.groups.map((g) => applyRisk(g, hunkById, rules));
   const groups: AnalysisGroup[] = orderGroups(finalized, hunkById).map((g) => {

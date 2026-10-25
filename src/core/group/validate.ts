@@ -1,6 +1,11 @@
 import type { ClassifiedHunk } from '../classify/index.js';
+import {
+  assessLockfileHunks,
+  LOCKFILE_INTEGRITY_REASON,
+  LOCKFILE_NO_MANIFEST_REASON,
+} from '../classify/lockfile.js';
 import type { GroupingOutput } from './prompt.js';
-import { MECHANICAL_TITLE, UNCLASSIFIED_TITLE, type DraftGroup } from './types.js';
+import { LOCKFILE_TITLE, MECHANICAL_TITLE, UNCLASSIFIED_TITLE, type DraftGroup } from './types.js';
 
 export interface ValidateResult {
   groups: DraftGroup[];
@@ -15,11 +20,14 @@ export interface ValidateResult {
  * - Unknown ids are dropped; duplicates stay in the first group that lists them.
  * - Mechanical hunks always go to "Mechanical changes", whatever the model said.
  * - Missing hunks are back-filled into "Unclassified — must read" (medium risk or higher).
- * Groups left empty are dropped. Pass `output = undefined` for the directory fallback.
+ * - Lockfile hunks without a matching manifest change, or with an integrity/source change but no
+ *   version change, go to "Lockfile changes — verify" instead (never auto-cleared).
+ * Groups left empty are dropped. `allPaths` lists every changed path in the PR. Pass `output = undefined` for the directory fallback.
  */
 export function validateGrouping(
   output: GroupingOutput | undefined,
   hunks: readonly ClassifiedHunk[],
+  allPaths: readonly string[] = hunks.map((c) => c.hunk.path),
 ): ValidateResult {
   const known = new Map(hunks.map((c) => [c.hunk.id, c]));
   const placed = new Set<string>();
@@ -73,21 +81,60 @@ export function validateGrouping(
         unclassified: true,
       });
     }
-    return finishValidation(groups, hunks, missing.length, unknownIds, duplicateIds);
+    return finishValidation(groups, hunks, allPaths, missing.length, unknownIds, duplicateIds);
   }
-  return finishValidation([...fallbackGrouping(reviewable)], hunks, 0, unknownIds, duplicateIds);
+  return finishValidation(
+    [...fallbackGrouping(reviewable)],
+    hunks,
+    allPaths,
+    0,
+    unknownIds,
+    duplicateIds,
+  );
 }
 
 function finishValidation(
   groups: DraftGroup[],
   hunks: readonly ClassifiedHunk[],
+  allPaths: readonly string[],
   backfilled: number,
   unknownIds: number,
   duplicateIds: number,
 ): ValidateResult {
-  const mech = mechanicalGroup(hunks);
+  const { flagged } = assessLockfileHunks(hunks, allPaths);
+  const lock = lockfileGroup(hunks, flagged);
+  if (lock) groups.push(lock);
+  const mech = mechanicalGroup(hunks.filter((c) => !flagged.has(c.hunk.id)));
   if (mech) groups.push(mech);
   return { groups, backfilled, unknownIds, duplicateIds };
+}
+
+function lockfileGroup(
+  hunks: readonly ClassifiedHunk[],
+  flagged: ReturnType<typeof assessLockfileHunks>['flagged'],
+): DraftGroup | undefined {
+  const ids = hunks.filter((c) => flagged.has(c.hunk.id)).map((c) => c.hunk.id);
+  if (ids.length === 0) return undefined;
+  const entries = ids.map((id) => flagged.get(id)!);
+  const riskReasons: string[] = [];
+  for (const m of new Set(entries.flatMap((e) => (e.noManifest ? [e.noManifest] : [])))) {
+    riskReasons.push(`${LOCKFILE_NO_MANIFEST_REASON} (${m})`);
+  }
+  const integrity = entries.some((e) => e.integrity);
+  if (integrity) riskReasons.push(LOCKFILE_INTEGRITY_REASON);
+  return {
+    title: LOCKFILE_TITLE,
+    intent:
+      'Lockfile edits that are not fully explained by a manifest change. Check that the resolved versions, sources and hashes are what you expect.',
+    kind: 'config',
+    risk: integrity ? 'high' : 'medium',
+    riskReasons,
+    verify: [],
+    hunkIds: ids,
+    dependsOnIdx: [],
+    llmIndex: -1,
+    autoClear: false,
+  };
 }
 
 export function mechanicalGroup(hunks: readonly ClassifiedHunk[]): DraftGroup | undefined {
@@ -95,8 +142,7 @@ export function mechanicalGroup(hunks: readonly ClassifiedHunk[]): DraftGroup | 
   if (ids.length === 0) return undefined;
   return {
     title: MECHANICAL_TITLE,
-    intent:
-      'Lockfiles, generated code, snapshots, vendored code, renames and whitespace-only edits.',
+    intent: 'Generated code, snapshots, vendored code, renames and whitespace-only edits.',
     kind: 'mechanical',
     risk: 'low',
     riskReasons: [],
