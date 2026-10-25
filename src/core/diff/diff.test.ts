@@ -209,4 +209,24 @@ describe('isCommentable', () => {
       true,
     );
   });
+
+  it('orders cross-side ranges by position in the hunk, not by line number', () => {
+    const patch = '@@ -98,4 +88,4 @@\n a\n b\n-old\n+new\n c';
+    const h = parsePatch(file, patch); // context 98/88, 99/89, del 100, add 90, context 101/91
+    expect(isCommentable(h, { side: 'RIGHT', line: 90, startLine: 100, startSide: 'LEFT' })).toBe(
+      true,
+    );
+    // Same numbers, but the end is not after the start in diff order.
+    expect(isCommentable(h, { side: 'LEFT', line: 100, startLine: 90, startSide: 'RIGHT' })).toBe(
+      false,
+    );
+    // RIGHT start before a LEFT end is not a shape GitHub accepts.
+    expect(isCommentable(hunks, { side: 'LEFT', line: 2, startLine: 1, startSide: 'RIGHT' })).toBe(
+      false,
+    );
+    // LEFT start after the RIGHT end.
+    expect(isCommentable(hunks, { side: 'RIGHT', line: 2, startLine: 3, startSide: 'LEFT' })).toBe(
+      false,
+    );
+  });
 });

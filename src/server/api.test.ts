@@ -126,6 +126,19 @@ describe('drafts', () => {
     );
     expect((await call('PUT', '/api/drafts', { path: 'x' })).status).toBe(400);
   });
+
+  it('only compares startLine with line when both are on the same side', async () => {
+    const { call } = setup();
+    const put = async (over: Record<string, unknown>) =>
+      (await call('PUT', '/api/drafts', { ...draft, ...over })).status;
+    // Same side (startSide defaults to side), reversed.
+    expect(await put({ line: 90, startLine: 100 })).toBe(400);
+    expect(await put({ line: 90, startLine: 100, startSide: 'RIGHT' })).toBe(400);
+    // LEFT 100 -> RIGHT 90 is a valid forward range; numbers are not comparable across sides.
+    expect(await put({ line: 90, startLine: 100, startSide: 'LEFT' })).toBe(200);
+    // RIGHT start with a LEFT end is not supported.
+    expect(await put({ side: 'LEFT', line: 100, startLine: 90, startSide: 'RIGHT' })).toBe(400);
+  });
 });
 
 describe('POST /api/review', () => {

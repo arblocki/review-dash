@@ -20,10 +20,18 @@ const draftSchema = z
     hunkId: z.string().min(1).optional(),
     headSha: z.string().min(1),
   })
-  .refine((d) => d.startLine === undefined || d.startLine <= d.line, {
-    message: 'startLine must not be after line',
-    path: ['startLine'],
-  });
+  .refine(
+    // Line numbers only compare within one side; cross-side order is checked against the diff.
+    (d) => d.startLine === undefined || (d.startSide ?? d.side) !== d.side || d.startLine <= d.line,
+    { message: 'startLine must not be after line', path: ['startLine'] },
+  )
+  .refine(
+    (d) => d.startLine === undefined || (d.startSide ?? d.side) !== 'RIGHT' || d.side !== 'LEFT',
+    {
+      message: 'a range cannot start on RIGHT and end on LEFT',
+      path: ['startSide'],
+    },
+  );
 
 const reviewSchema = z.object({
   event: z.enum(['COMMENT', 'APPROVE', 'REQUEST_CHANGES']),
