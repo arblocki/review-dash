@@ -28,6 +28,7 @@ query($owner: String!, $repo: String!, $number: Int!, $after: String) {
         nodes {
           id isResolved isOutdated path line originalLine diffSide startLine
           comments(first: 100) {
+            pageInfo { hasNextPage endCursor }
             nodes { id databaseId author { login } body createdAt url }
           }
         }
@@ -35,6 +36,29 @@ query($owner: String!, $repo: String!, $number: Int!, $after: String) {
     }
   }
 }`;
+
+const THREAD_COMMENTS_QUERY = `
+query($id: ID!, $after: String) {
+  node(id: $id) {
+    ... on PullRequestReviewThread {
+      comments(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id databaseId author { login } body createdAt url }
+      }
+    }
+  }
+}`;
+
+function toThreadComment(c: Json): ThreadComment {
+  return {
+    id: c.id,
+    databaseId: c.databaseId ?? null,
+    author: c.author?.login ?? null,
+    body: c.body ?? '',
+    createdAt: c.createdAt,
+    url: c.url,
+  };
+}
 
 /** Builds the REST/GraphQL adapters for a token. The token never leaves these closures. */
 export function createOctokitClients(token: string): { rest: RestLike; gql: GraphqlLike } {
@@ -162,14 +186,19 @@ export function createGitHubClient(deps: { rest: RestLike; gql: GraphqlLike }): 
         const conn = res.repository?.pullRequest?.reviewThreads;
         if (!conn) break;
         for (const t of conn.nodes as Json[]) {
-          const comments: ThreadComment[] = (t.comments?.nodes ?? []).map((c: Json) => ({
-            id: c.id,
-            databaseId: c.databaseId ?? null,
-            author: c.author?.login ?? null,
-            body: c.body ?? '',
-            createdAt: c.createdAt,
-            url: c.url,
-          }));
+          const comments: ThreadComment[] = (t.comments?.nodes ?? []).map(toThreadComment);
+          // Threads with more than 100 comments need their own pagination.
+          let page = t.comments?.pageInfo;
+          while (page?.hasNextPage) {
+            const more = (await gql(THREAD_COMMENTS_QUERY, {
+              id: t.id,
+              after: page.endCursor,
+            })) as Json;
+            const next = more.node?.comments;
+            if (!next) break;
+            comments.push(...(next.nodes as Json[]).map(toThreadComment));
+            page = next.pageInfo;
+          }
           threads.push({
             id: t.id,
             isResolved: !!t.isResolved,

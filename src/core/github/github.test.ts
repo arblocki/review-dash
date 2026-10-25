@@ -142,6 +142,70 @@ describe('github client', () => {
     expect(threads[0]?.comments[0]).toMatchObject({ databaseId: 7, author: 'bob' });
   });
 
+  it('pages through comments of a thread with more than 100', async () => {
+    const comment = (n: number) => ({
+      id: `C${n}`,
+      databaseId: n,
+      author: { login: 'bob' },
+      body: `b${n}`,
+      createdAt: 'now',
+      url: 'u',
+    });
+    const queries: Record<string, unknown>[] = [];
+    const gql: GraphqlLike = async (q, vars) => {
+      queries.push(vars);
+      if (q.includes('node(id')) {
+        return {
+          node: {
+            comments: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [comment(101), comment(102)],
+            },
+          },
+        };
+      }
+      return {
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [
+                {
+                  id: 'T1',
+                  path: 'a.ts',
+                  diffSide: 'RIGHT',
+                  comments: {
+                    pageInfo: { hasNextPage: true, endCursor: 'cc1' },
+                    nodes: Array.from({ length: 100 }, (_, i) => comment(i + 1)),
+                  },
+                },
+                {
+                  id: 'T2',
+                  path: 'b.ts',
+                  diffSide: 'RIGHT',
+                  comments: {
+                    pageInfo: { hasNextPage: false, endCursor: null },
+                    nodes: [comment(500)],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      };
+    };
+    const threads = await createGitHubClient({
+      rest: { request: async () => ({ data: {} }) },
+      gql,
+    }).fetchReviewThreads(ref);
+    expect(threads[0]?.comments.map((c) => c.databaseId)).toEqual(
+      Array.from({ length: 102 }, (_, i) => i + 1),
+    );
+    expect(threads[1]?.comments).toHaveLength(1);
+    expect(queries).toHaveLength(2);
+    expect(queries[1]).toEqual({ id: 'T1', after: 'cc1' });
+  });
+
   it('posts reviews with commit_id', async () => {
     let seen: Record<string, unknown> | undefined;
     const rest: RestLike = {
