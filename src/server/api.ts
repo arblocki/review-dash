@@ -172,14 +172,16 @@ export function registerApi(app: Hono, { pr: ref, github, store }: ApiDeps): voi
       event,
       githubReviewId: submitted.id,
     });
-    store.deleteDrafts(
+    // Drafts edited while the submission was in flight stay; the client tells the user.
+    const keptDrafts = store.deleteDraftsIfUnchanged(
       ref,
-      built.included.map((d) => d.id),
+      built.included.map((d) => ({ id: d.id, revision: d.revision })),
     );
     return c.json({
       reviewUrl: submitted.url,
       fallbacks: built.fallbacks,
       outdated: built.outdated,
+      keptDrafts,
     });
   });
 

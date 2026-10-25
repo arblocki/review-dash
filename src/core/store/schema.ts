@@ -59,4 +59,6 @@ export const MIGRATIONS: readonly string[] = [
     submitted_at     TEXT NOT NULL
   );
   `,
+  // Monotonic per-draft counter: updated_at is millisecond-resolution, so two saves can tie.
+  `ALTER TABLE drafts ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;`,
 ];

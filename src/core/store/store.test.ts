@@ -43,4 +43,24 @@ describe('store drafts', () => {
       s.recordSubmittedReview(ref, { headSha: 'abc', event: 'COMMENT', githubReviewId: 5 }),
     ).not.toThrow();
   });
+
+  it('bumps the revision on every upsert, even within the same millisecond', () => {
+    const s = openStore(':memory:');
+    const a = s.upsertDraft(ref, base);
+    expect(a.revision).toBe(1);
+    const b = s.upsertDraft(ref, { ...base, id: a.id });
+    expect(b.revision).toBe(2);
+  });
+
+  it('deletes only drafts unchanged since the snapshot and reports the rest', () => {
+    const s = openStore(':memory:');
+    const a = s.upsertDraft(ref, base);
+    const b = s.upsertDraft(ref, { ...base, line: 9 });
+    const c = s.upsertDraft(ref, { ...base, line: 10 });
+    const snapshot = [a, b, c].map((d) => ({ id: d.id, revision: d.revision }));
+    s.upsertDraft(ref, { ...base, id: b.id, line: 9, body: 'edited' });
+    s.deleteDraft(ref, c.id); // removed by the user meanwhile: nothing to keep
+    expect(s.deleteDraftsIfUnchanged(ref, snapshot)).toEqual([b.id]);
+    expect(s.listDrafts(ref).map((d) => [d.id, d.body])).toEqual([[b.id, 'edited']]);
+  });
 });

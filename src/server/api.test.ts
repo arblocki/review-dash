@@ -175,6 +175,33 @@ describe('POST /api/review', () => {
     expect((await (await call('GET', '/api/drafts')).json()).drafts).toEqual([]);
   });
 
+  it('keeps drafts edited while the submission was in flight', async () => {
+    const { call, github, store } = setup();
+    const a = (await (await call('PUT', '/api/drafts', draft)).json()).draft;
+    const b = (await (await call('PUT', '/api/drafts', { ...draft, line: 3 })).json()).draft;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const entered = new Promise<void>((resolve) => {
+      const orig = github.submitReview.bind(github);
+      github.submitReview = async (r, input) => {
+        resolve();
+        await gate;
+        return orig(r, input);
+      };
+    });
+    const pending = call('POST', '/api/review', { event: 'COMMENT', headSha: HEAD });
+    await entered;
+    store.upsertDraft(pr, { ...draft, side: 'RIGHT', id: a.id, body: 'edited meanwhile' });
+    release();
+    const res = await pending;
+    expect(res.status).toBe(200);
+    expect((await res.json()).keptDrafts).toEqual([a.id]);
+    expect(github.calls.submitReview[0]?.comments.map((c) => c.body)).toEqual(['nit', 'nit']);
+    const left = store.listDrafts(pr);
+    expect(left.map((d) => [d.id, d.body])).toEqual([[a.id, 'edited meanwhile']]);
+    expect(left.some((d) => d.id === b.id)).toBe(false);
+  });
+
   it('returns 409 when head moved, and submits with force against the new head', async () => {
     const { call, github } = setup();
     await call('PUT', '/api/drafts', draft);

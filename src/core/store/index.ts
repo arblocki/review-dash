@@ -19,9 +19,11 @@ export interface Draft {
   /** Head SHA of the PR the draft was written against. */
   headSha: string;
   updatedAt: string;
+  /** Incremented on every upsert; lets a submission detect edits made while it was in flight. */
+  revision: number;
 }
 
-export type DraftInput = Omit<Draft, 'id' | 'updatedAt'> & { id?: string };
+export type DraftInput = Omit<Draft, 'id' | 'updatedAt' | 'revision'> & { id?: string };
 
 export interface SubmittedReviewRecord {
   headSha: string;
@@ -35,6 +37,11 @@ export interface Store {
   upsertDraft(ref: PrRef, input: DraftInput): Draft;
   deleteDraft(ref: PrRef, id: string): boolean;
   deleteDrafts(ref: PrRef, ids: string[]): void;
+  /**
+   * Deletes the drafts whose revision still matches the submitted snapshot, in one transaction.
+   * Returns the ids of drafts kept because they were edited since the snapshot was taken.
+   */
+  deleteDraftsIfUnchanged(ref: PrRef, snapshot: { id: string; revision: number }[]): string[];
   recordSubmittedReview(ref: PrRef, rec: SubmittedReviewRecord): void;
   close(): void;
 }
@@ -50,6 +57,7 @@ interface DraftRow {
   hunk_id: string | null;
   head_sha: string;
   updated_at: string;
+  revision: number;
 }
 
 function toDraft(r: DraftRow): Draft {
@@ -61,6 +69,7 @@ function toDraft(r: DraftRow): Draft {
     body: r.body,
     headSha: r.head_sha,
     updatedAt: r.updated_at,
+    revision: r.revision,
   };
   if (r.start_line !== null) d.startLine = r.start_line;
   if (r.start_side !== null) d.startSide = r.start_side;
@@ -89,17 +98,21 @@ export function openStore(file: string): Store {
     'SELECT * FROM drafts WHERE repo = ? AND pr = ? ORDER BY path, line, updated_at',
   );
   const upsert = db.prepare(`
-    INSERT INTO drafts (id, repo, pr, path, side, line, start_line, start_side, body, hunk_id, head_sha, updated_at)
-    VALUES (@id, @repo, @pr, @path, @side, @line, @startLine, @startSide, @body, @hunkId, @headSha, @updatedAt)
+    INSERT INTO drafts (id, repo, pr, path, side, line, start_line, start_side, body, hunk_id, head_sha, updated_at, revision)
+    VALUES (@id, @repo, @pr, @path, @side, @line, @startLine, @startSide, @body, @hunkId, @headSha, @updatedAt, 1)
     ON CONFLICT (id) DO UPDATE SET
       path = excluded.path, side = excluded.side, line = excluded.line,
       start_line = excluded.start_line, start_side = excluded.start_side, body = excluded.body,
-      hunk_id = excluded.hunk_id, head_sha = excluded.head_sha, updated_at = excluded.updated_at
+      hunk_id = excluded.hunk_id, head_sha = excluded.head_sha, updated_at = excluded.updated_at,
+      revision = drafts.revision + 1
     WHERE drafts.repo = excluded.repo AND drafts.pr = excluded.pr`);
   const get = db.prepare<[string, string, number], DraftRow>(
     'SELECT * FROM drafts WHERE id = ? AND repo = ? AND pr = ?',
   );
   const del = db.prepare('DELETE FROM drafts WHERE id = ? AND repo = ? AND pr = ?');
+  const delIfRevision = db.prepare(
+    'DELETE FROM drafts WHERE id = ? AND repo = ? AND pr = ? AND revision = ?',
+  );
   const insertReview = db.prepare(`
     INSERT INTO reviews_submitted (repo, pr, head_sha, github_review_id, event, submitted_at)
     VALUES (?, ?, ?, ?, ?, ?)`);
@@ -138,6 +151,21 @@ export function openStore(file: string): Store {
       const repo = `${ref.owner}/${ref.repo}`;
       db.transaction(() => {
         for (const id of ids) del.run(id, repo, ref.number);
+      })();
+    },
+    deleteDraftsIfUnchanged(ref, snapshot) {
+      const repo = `${ref.owner}/${ref.repo}`;
+      return db.transaction(() => {
+        const kept: string[] = [];
+        for (const { id, revision } of snapshot) {
+          if (
+            delIfRevision.run(id, repo, ref.number, revision).changes === 0 &&
+            get.get(id, repo, ref.number)
+          ) {
+            kept.push(id);
+          }
+        }
+        return kept;
       })();
     },
     recordSubmittedReview(ref, rec) {
