@@ -123,11 +123,17 @@ export async function startDemo(opts: { port?: number; self?: boolean } = {}): P
     if (!pair) throw new Error(`no such file ${path}`);
     return sha === fx.pr.baseSha ? pair[0] : pair[1];
   };
-  const thread = (id: string, resolved: boolean, line: number, body: string): ReviewThread => ({
+  const thread = (
+    id: string,
+    resolved: boolean,
+    line: number,
+    body: string,
+    path = 'src/greet.ts',
+  ): ReviewThread => ({
     id,
     isResolved: resolved,
     isOutdated: false,
-    path: 'src/greet.ts',
+    path,
     line,
     originalLine: line,
     diffSide: 'RIGHT',
@@ -146,6 +152,8 @@ export async function startDemo(opts: { port?: number; self?: boolean } = {}): P
   github.threads = [
     thread('t1', false, 17, 'Should this prefix be configurable?'),
     thread('t2', true, 22, 'Nit: fixed in the next commit.'),
+    // Files without a rendered diff still show their discussion.
+    thread('t3', false, 1, 'Can we compress this logo?', 'assets/logo.png'),
   ];
 
   const server = await startServer({

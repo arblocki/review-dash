@@ -24,8 +24,9 @@ import {
   type Gap,
 } from '../lib/diffModel';
 import { highlightHunks, languageForPath } from '../lib/highlight';
+import { placeThreads } from '../lib/threadPlacement';
 import { useFileDraftAnchors, useReview } from '../state';
-import type { Hunk, ParsedFile } from '../types';
+import type { Hunk, ParsedFile, ReviewThread } from '../types';
 import { DraftComposer } from './DraftComposer';
 import { ThreadWidget } from './ThreadWidget';
 
@@ -67,13 +68,22 @@ export function FileDiff({
   hunks?: Hunk[];
   anchorId?: string;
 }) {
-  const { pr, hideWhitespace } = useReview();
+  const { pr, hideWhitespace, threads } = useReview();
   const [collapsed, setCollapsed] = useState(false);
   const shown = useMemo(
     () => (hideWhitespace ? hideWhitespaceOnly(hunks) : hunks),
     [hunks, hideWhitespace],
   );
   const hidden = useMemo(() => file.hunks.filter((h) => !hunks.includes(h)), [file.hunks, hunks]);
+  const placement = useMemo(
+    () =>
+      placeThreads(
+        threads.filter((t) => t.path === file.path),
+        shown,
+        hidden,
+      ),
+    [threads, file.path, shown, hidden],
+  );
   const githubLink = `${pr.url}/files`;
   const changed = hunks.reduce((n, h) => n + h.lines.length, 0);
 
@@ -93,7 +103,7 @@ export function FileDiff({
   } else {
     body = (
       <LazyMount estimate={changed * 20 + 40}>
-        <FileDiffBody file={file} hunks={shown} hidden={hidden} />
+        <FileDiffBody file={file} hunks={shown} hidden={hidden} threads={placement.inline} />
       </LazyMount>
     );
   }
@@ -133,6 +143,17 @@ export function FileDiff({
           <span className="text-red-700 dark:text-red-400">−{file.deletions}</span>
         </span>
       </div>
+      {!collapsed && placement.fileLevel.length > 0 && (
+        <div
+          className="border-b border-gray-200 bg-gray-50/50 py-1 dark:border-gray-800 dark:bg-gray-900/40"
+          data-testid="file-discussion"
+        >
+          <p className="px-3 text-xs font-semibold text-gray-500 dark:text-gray-400">Discussion</p>
+          {placement.fileLevel.map((t) => (
+            <ThreadWidget key={t.id} thread={t} showLocation />
+          ))}
+        </div>
+      )}
       {!collapsed && body}
     </section>
   );
@@ -188,13 +209,16 @@ const FileDiffBody = memo(function FileDiffBody({
   file,
   hunks,
   hidden,
+  threads: fileThreads,
 }: {
   file: ParsedFile;
   hunks: Hunk[];
   /** Original hunks of this file that are not being displayed. */
   hidden: Hunk[];
+  /** Threads on lines of `hunks`; the rest are shown by FileDiff. */
+  threads: ReviewThread[];
 }) {
-  const { pr, threads, viewType, fetchFile, startDraft } = useReview();
+  const { pr, viewType, fetchFile, startDraft } = useReview();
   const anchors = useFileDraftAnchors(file.path);
   const language = useMemo(() => languageForPath(file.path), [file.path]);
 
@@ -229,10 +253,6 @@ const FileDiffBody = memo(function FileDiffBody({
   }
 
   // --- threads and drafts as widgets
-  const fileThreads = useMemo(
-    () => threads.filter((t) => t.path === file.path),
-    [threads, file.path],
-  );
   const { widgets, unplaced } = useMemo(() => {
     const byKey = new Map<string, ReactNode[]>();
     const unplaced: ReactNode[] = [];
