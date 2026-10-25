@@ -22,8 +22,11 @@ export function DraftComposer({ draftId, inline }: { draftId: string; inline: bo
       ? `lines ${draft.startLine}–${draft.line}`
       : `line ${draft.line}`;
   const empty = body.trim() === '';
-  const status =
-    empty && draft.status !== 'saved' ? 'Write something to save' : STATUS_LABEL[draft.status];
+  const status = draft.error
+    ? draft.error
+    : empty && draft.status !== 'saved' && !draft.persisted
+      ? 'Write something to save'
+      : STATUS_LABEL[draft.status];
 
   return (
     <div

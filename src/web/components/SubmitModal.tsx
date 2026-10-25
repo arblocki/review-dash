@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ApiError, api, jsonBody } from '../api';
 import { classifyDraft } from '../lib/diffModel';
+import type { UnsyncedDraft } from '../lib/draftSync';
+import { runSubmit } from '../lib/submitFlow';
 import { useDrafts, useReview } from '../state';
 import type { LineRange, SubmitEvent, SubmitResult } from '../types';
 
@@ -8,9 +10,13 @@ type Phase =
   | { kind: 'saving' }
   | { kind: 'ready' }
   | { kind: 'submitting' }
+  | { kind: 'unsynced'; failed: UnsyncedDraft[] }
   | { kind: 'head_moved'; event: SubmitEvent; currentHeadSha: string }
   | { kind: 'error'; message: string }
   | { kind: 'done'; result: SubmitResult };
+
+const afterFlush = (failed: UnsyncedDraft[]): Phase =>
+  failed.length > 0 ? { kind: 'unsynced', failed } : { kind: 'ready' };
 
 function rangeLabel(d: { line: number; startLine?: number }): string {
   return d.startLine !== undefined && d.startLine !== d.line
@@ -27,11 +33,16 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
   // Make sure the server has the latest text of every draft before listing them.
   useEffect(() => {
     let cancelled = false;
-    flushDrafts().then(() => !cancelled && setPhase({ kind: 'ready' }));
+    flushDrafts().then((failed) => !cancelled && setPhase(afterFlush(failed)));
     return () => {
       cancelled = true;
     };
   }, [flushDrafts]);
+
+  async function retrySaving() {
+    setPhase({ kind: 'saving' });
+    setPhase(afterFlush(await flushDrafts()));
+  }
 
   const items = useMemo(() => {
     const byPath = new Map(files.map((f) => [f.path, f.hunks]));
@@ -54,12 +65,20 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
   async function submit(event: SubmitEvent, force = false) {
     setPhase({ kind: 'submitting' });
     try {
-      await flushDrafts();
-      const result = await api<SubmitResult>('/api/review', {
-        method: 'POST',
-        // The head we are showing; the server refuses with head_moved if GitHub has moved on.
-        ...jsonBody({ event, body, headSha: pr.headSha, ...(force ? { force: true } : {}) }),
+      const outcome = await runSubmit({
+        flush: flushDrafts,
+        post: () =>
+          api<SubmitResult>('/api/review', {
+            method: 'POST',
+            // The head we are showing; the server refuses with head_moved if GitHub has moved on.
+            ...jsonBody({ event, body, headSha: pr.headSha, ...(force ? { force: true } : {}) }),
+          }),
       });
+      if (outcome.kind === 'unsynced') {
+        setPhase({ kind: 'unsynced', failed: outcome.failed });
+        return;
+      }
+      const result = outcome.result;
       await reloadAfterSubmit();
       setPhase({ kind: 'done', result });
     } catch (err) {
@@ -75,7 +94,7 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const busy = phase.kind === 'saving' || phase.kind === 'submitting';
+  const busy = phase.kind === 'saving' || phase.kind === 'submitting' || phase.kind === 'unsynced';
   const done = phase.kind === 'done';
   const fallbackCount = items.filter((i) => i.kind === 'fallback').length;
   const outdatedCount = items.filter((i) => i.kind === 'outdated').length;
@@ -208,6 +227,31 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
                     onClick={() => void submit(phase.event, true)}
                   >
                     Submit anyway
+                  </button>
+                </div>
+              </div>
+            )}
+            {phase.kind === 'unsynced' && (
+              <div
+                className="mt-3 rounded border border-red-400 bg-red-50 p-2 text-sm text-red-900 dark:bg-red-950 dark:text-red-200"
+                role="alert"
+                data-testid="unsynced-drafts"
+              >
+                Some drafts could not be saved, so the review was not submitted:
+                <ul className="mt-1 list-disc pl-5 font-mono text-xs">
+                  {phase.failed.map((f) => (
+                    <li key={f.id}>
+                      {f.path}:{rangeLabel(f)} <span className="font-sans">({f.message})</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    className={`${btn} bg-red-600 hover:bg-red-700`}
+                    onClick={() => void retrySaving()}
+                  >
+                    Retry saving
                   </button>
                 </div>
               </div>

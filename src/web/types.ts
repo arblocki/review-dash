@@ -46,6 +46,10 @@ export type DraftStatus = 'new' | 'dirty' | 'saving' | 'saved' | 'error';
 export interface LocalDraft extends Omit<Draft, 'updatedAt' | 'revision'> {
   status: DraftStatus;
   persisted: boolean;
+  /** Why the last save or delete failed (status 'error'). */
+  error?: string;
+  /** Deleted in the UI but the server still has it; the delete is retried on sync. */
+  pendingDelete?: boolean;
 }
 
 export interface SubmitResult {

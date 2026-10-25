@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { api, jsonBody } from './api';
 import { sourceLines } from './lib/diffModel';
+import { createDraftSync, type UnsyncedDraft } from './lib/draftSync';
 import type {
   Draft,
   LineRange,
@@ -24,8 +25,6 @@ import type {
 } from './types';
 
 export type ViewType = 'unified' | 'split';
-
-const AUTOSAVE_MS = 700;
 
 function usePersistentState<T extends string | boolean>(key: string, initial: T) {
   const [value, setValue] = useState<T>(() => {
@@ -71,8 +70,11 @@ export interface ReviewContextValue {
   startDraft(input: { path: string; range: LineRange; hunkId?: string }): string;
   updateDraftBody(id: string, body: string): void;
   deleteDraft(id: string): Promise<void>;
-  /** Saves every dirty draft now (called before submitting). */
-  flushDrafts(): Promise<void>;
+  /**
+   * Syncs every draft with the server now (called before submitting). Resolves with the drafts
+   * the server still doesn't match; non-empty means a submit would send stale comments.
+   */
+  flushDrafts(): Promise<UnsyncedDraft[]>;
   /** Re-reads drafts and threads from the server (after a submit). */
   reloadAfterSubmit(): Promise<void>;
   replyToThread(thread: ReviewThread, body: string): Promise<void>;
@@ -149,8 +151,6 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
 
   // Drafts live in a ref so autosave callbacks always see the latest text.
   const draftsRef = useRef<LocalDraft[]>([]);
-  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-  const inflight = useRef(new Map<string, Promise<void>>());
   const loadedRef = useRef<Loaded | null>(null);
   loadedRef.current = loaded;
   const fileCache = useRef(new Map<string, Promise<string[]>>());
@@ -159,9 +159,8 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
     draftsRef.current = fn(draftsRef.current);
     setDraftsState(draftsRef.current);
   }, []);
-  const patchDraft = useCallback(
-    (id: string, patch: Partial<LocalDraft>) =>
-      mutateDrafts((ds) => ds.map((d) => (d.id === id ? { ...d, ...patch } : d))),
+  const sync = useMemo(
+    () => createDraftSync(api, { get: () => draftsRef.current, update: mutateDrafts }),
     [mutateDrafts],
   );
 
@@ -235,57 +234,6 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
 
   // --- drafts ---------------------------------------------------------------------------
 
-  const saveDraft = useCallback(
-    async (id: string): Promise<void> => {
-      const timer = timers.current.get(id);
-      if (timer) clearTimeout(timer);
-      timers.current.delete(id);
-      // Serialize saves per draft so an older body can't land after a newer one.
-      const previous = inflight.current.get(id);
-      if (previous) await previous.catch(() => undefined);
-
-      const d = draftsRef.current.find((x) => x.id === id);
-      if (!d || !d.body.trim()) return;
-      const sent = d.body;
-      patchDraft(id, { status: 'saving' });
-      const run = (async () => {
-        try {
-          await api<{ draft: Draft }>('/api/drafts', {
-            method: 'PUT',
-            ...jsonBody({
-              id,
-              path: d.path,
-              side: d.side,
-              line: d.line,
-              startLine: d.startLine,
-              startSide: d.startSide,
-              body: sent,
-              hunkId: d.hunkId,
-              headSha: d.headSha,
-            }),
-          });
-          const cur = draftsRef.current.find((x) => x.id === id);
-          if (cur)
-            patchDraft(id, { persisted: true, status: cur.body === sent ? 'saved' : 'dirty' });
-        } catch {
-          if (draftsRef.current.some((x) => x.id === id)) patchDraft(id, { status: 'error' });
-        }
-      })();
-      inflight.current.set(id, run);
-      await run;
-      if (inflight.current.get(id) === run) inflight.current.delete(id);
-      // Text typed while the request was in flight still needs saving.
-      const cur = draftsRef.current.find((x) => x.id === id);
-      if (cur?.status === 'dirty') {
-        timers.current.set(
-          id,
-          setTimeout(() => void saveDraft(id), AUTOSAVE_MS),
-        );
-      }
-    },
-    [patchDraft],
-  );
-
   const startDraft = useCallback<ReviewContextValue['startDraft']>(
     ({ path, range, hunkId }) => {
       // Re-clicking a line that already has an empty composer reuses it.
@@ -320,51 +268,7 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
     [mutateDrafts],
   );
 
-  const updateDraftBody = useCallback(
-    (id: string, body: string) => {
-      patchDraft(id, { body, status: 'dirty' });
-      const existing = timers.current.get(id);
-      if (existing) clearTimeout(existing);
-      timers.current.set(
-        id,
-        setTimeout(() => void saveDraft(id), AUTOSAVE_MS),
-      );
-    },
-    [patchDraft, saveDraft],
-  );
-
-  const deleteDraft = useCallback(
-    async (id: string) => {
-      const timer = timers.current.get(id);
-      if (timer) clearTimeout(timer);
-      timers.current.delete(id);
-      const d = draftsRef.current.find((x) => x.id === id);
-      const pending = inflight.current.get(id);
-      mutateDrafts((ds) => ds.filter((x) => x.id !== id));
-      if (pending) await pending.catch(() => undefined);
-      if (d?.persisted || pending) {
-        try {
-          await api(`/api/drafts/${encodeURIComponent(id)}`, { method: 'DELETE' });
-        } catch {
-          // already gone (404) or unreachable; the local copy is deleted either way
-        }
-      }
-    },
-    [mutateDrafts],
-  );
-
-  const flushDrafts = useCallback(async () => {
-    const ids = draftsRef.current
-      .filter(
-        (d) =>
-          d.body.trim() && (d.status === 'dirty' || d.status === 'error' || d.status === 'new'),
-      )
-      .map((d) => d.id);
-    await Promise.all([
-      ...ids.map((id) => saveDraft(id)),
-      ...[...inflight.current.values()].map((p) => p.catch(() => undefined)),
-    ]);
-  }, [saveDraft]);
+  const { updateBody: updateDraftBody, remove: deleteDraft, flush: flushDrafts } = sync;
 
   const reloadAfterSubmit = useCallback(async () => {
     // Submitted drafts are deleted server-side; drop local copies that are now gone.
@@ -402,10 +306,7 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
-  useEffect(() => {
-    const t = timers.current;
-    return () => t.forEach(clearTimeout);
-  }, []);
+  useEffect(() => () => sync.dispose(), [sync]);
 
   const value = useMemo<ReviewContextValue | null>(
     () =>
