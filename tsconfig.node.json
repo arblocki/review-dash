@@ -15,5 +15,5 @@
     "sourceMap": true
   },
   "include": ["src/cli", "src/server", "src/core"],
-  "exclude": ["**/*.test.ts"]
+  "exclude": ["**/*.test.ts", "**/*.testutil.ts"]
 }

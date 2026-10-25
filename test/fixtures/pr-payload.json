@@ -1,0 +1,49 @@
+{
+  "pr": {
+    "title": "Add greeting retries",
+    "body": "Retries the greeting call with backoff.",
+    "author": "octocat",
+    "state": "open",
+    "url": "https://github.com/octocat/hello-world/pull/1",
+    "baseSha": "1111111111111111111111111111111111111111",
+    "baseRef": "main",
+    "headSha": "2222222222222222222222222222222222222222",
+    "headRef": "retries",
+    "additions": 6,
+    "deletions": 2,
+    "changedFiles": 4
+  },
+  "files": [
+    {
+      "filename": "src/greet.ts",
+      "status": "modified",
+      "additions": 4,
+      "deletions": 1,
+      "changes": 5,
+      "patch": "@@ -1,5 +1,8 @@ import x\n export function greet(name: string) {\n-  return `Hello ${name}`;\n+  const prefix = 'Hello';\n+  return `${prefix} ${name}`;\n }\n \n+export const retries = 3;\n+export const backoffMs = 100;\n export default greet;\n@@ -20,3 +23,3 @@ function tail()\n a\n-b\n+c\n d\n\\ No newline at end of file"
+    },
+    {
+      "filename": "src/hello.ts",
+      "previous_filename": "src/greeting.ts",
+      "status": "renamed",
+      "additions": 0,
+      "deletions": 0,
+      "changes": 0
+    },
+    {
+      "filename": "assets/logo.png",
+      "status": "added",
+      "additions": 0,
+      "deletions": 0,
+      "changes": 0
+    },
+    {
+      "filename": "package-lock.json",
+      "status": "modified",
+      "additions": 2000,
+      "deletions": 1000,
+      "changes": 3000
+    }
+  ],
+  "viewer": "reviewer"
+}
