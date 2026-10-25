@@ -19,7 +19,7 @@ function rangeLabel(d: { line: number; startLine?: number }): string {
 }
 
 export function SubmitModal({ onClose }: { onClose: () => void }) {
-  const { files, isSelfReview, flushDrafts, reloadAfterSubmit } = useReview();
+  const { pr, files, isSelfReview, flushDrafts, reloadAfterSubmit } = useReview();
   const drafts = useDrafts();
   const [body, setBody] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'saving' });
@@ -54,7 +54,8 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
       await flushDrafts();
       const result = await api<SubmitResult>('/api/review', {
         method: 'POST',
-        ...jsonBody({ event, body, ...(force ? { force: true } : {}) }),
+        // The head we are showing; the server refuses with head_moved if GitHub has moved on.
+        ...jsonBody({ event, body, headSha: pr.headSha, ...(force ? { force: true } : {}) }),
       });
       await reloadAfterSubmit();
       setPhase({ kind: 'done', result });
@@ -173,9 +174,9 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
                 className="mt-3 rounded border border-amber-400 bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200"
                 data-testid="head-moved"
               >
-                The PR head moved to <code>{phase.currentHeadSha.slice(0, 7)}</code> since some
-                drafts were written, so their line numbers may no longer match. Refresh and check
-                them, or submit anyway.
+                The PR head moved to <code>{phase.currentHeadSha.slice(0, 7)}</code> since you
+                loaded it at <code>{pr.headSha.slice(0, 7)}</code>, so this review would cover
+                commits you have not seen. Refresh to review them, or submit anyway.
                 <div className="mt-2">
                   <button
                     type="button"
