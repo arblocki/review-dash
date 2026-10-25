@@ -1,4 +1,4 @@
-import { useDrafts } from '../state';
+import { useDrafts, useReview } from '../state';
 import type { ParsedFile } from '../types';
 import { fileAnchorId } from './FileDiff';
 
@@ -15,6 +15,7 @@ export function scrollToFile(path: string): void {
 
 /** Left-rail list of changed files; clicking scrolls the main column to that file. */
 export function FileList({ files }: { files: ParsedFile[] }) {
+  const { incomplete } = useReview();
   const drafts = useDrafts();
   const counts = new Map<string, number>();
   for (const d of drafts) if (d.body.trim()) counts.set(d.path, (counts.get(d.path) ?? 0) + 1);
@@ -22,7 +23,7 @@ export function FileList({ files }: { files: ParsedFile[] }) {
   return (
     <nav className="py-2 text-sm">
       <div className="px-3 pb-1 text-xs font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400">
-        Files ({files.length})
+        Files ({incomplete ? `${files.length} of ${incomplete.changedFiles}` : files.length})
       </div>
       <ul>
         {files.map((f) => {

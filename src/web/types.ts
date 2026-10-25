@@ -15,6 +15,14 @@ export interface PrResponse {
   diffHash: string;
   viewer: string;
   isSelfReview: boolean;
+  /** Set when GitHub truncated the file list (3,000-file limit). */
+  incomplete?: Incomplete;
+}
+
+export interface Incomplete {
+  fetchedFiles: number;
+  changedFiles: number;
+  reason: string;
 }
 
 /** Draft as stored by the server. */
@@ -29,12 +37,13 @@ export interface Draft {
   hunkId?: string;
   headSha: string;
   updatedAt: string;
+  revision: number;
 }
 
 export type DraftStatus = 'new' | 'dirty' | 'saving' | 'saved' | 'error';
 
 /** A draft being edited locally; `persisted` once the server has a copy. */
-export interface LocalDraft extends Omit<Draft, 'updatedAt'> {
+export interface LocalDraft extends Omit<Draft, 'updatedAt' | 'revision'> {
   status: DraftStatus;
   persisted: boolean;
 }
@@ -42,6 +51,10 @@ export interface LocalDraft extends Omit<Draft, 'updatedAt'> {
 export interface SubmitResult {
   reviewUrl: string;
   fallbacks: Draft[];
+  /** Drafts written against an older head; they went into the review body. */
+  outdated: Draft[];
+  /** Ids of drafts edited during submission, so kept rather than deleted. */
+  keptDrafts: string[];
 }
 
 export type { ReviewEvent as SubmitEvent };

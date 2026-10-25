@@ -10,6 +10,7 @@ import {
   gapAfter,
   gapBefore,
   hideWhitespaceOnly,
+  classifyDraft,
   isInlineRange,
   keysBetween,
   selectRange,
@@ -271,5 +272,28 @@ describe('highlightHunks', () => {
     expect(tokens?.new[0]?.some((t) => t.type === 'element')).toBe(true);
     expect(highlightHunks(hunks, undefined)).toBeUndefined();
     expect(highlightHunks(hunks, 'not-a-language')).toBeUndefined();
+  });
+});
+
+describe('classifyDraft', () => {
+  const hunk: Hunk = {
+    id: 'h',
+    header: '@@ -1,1 +1,1 @@',
+    oldStart: 1,
+    oldLines: 1,
+    newStart: 1,
+    newLines: 1,
+    lines: [{ type: 'add', newLine: 1, content: 'x' }],
+  } as unknown as Hunk;
+  const d = { path: 'a.ts', side: 'RIGHT' as const, line: 1, headSha: 'abc' };
+
+  it('is inline when on the current head and inside the diff', () => {
+    expect(classifyDraft(d, 'abc', [hunk])).toBe('inline');
+  });
+  it('is fallback when outside the diff', () => {
+    expect(classifyDraft({ ...d, line: 99 }, 'abc', [hunk])).toBe('fallback');
+  });
+  it('is outdated when written against another head, even if inside the diff', () => {
+    expect(classifyDraft(d, 'def', [hunk])).toBe('outdated');
   });
 });

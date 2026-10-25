@@ -15,6 +15,7 @@ import type {
   LineRange,
   LocalDraft,
   PrMeta,
+  Incomplete,
   PrResponse,
   ParsedFile,
   ReviewThread,
@@ -55,6 +56,7 @@ export interface ReviewContextValue {
   files: ParsedFile[];
   viewer: string;
   isSelfReview: boolean;
+  incomplete?: Incomplete;
   threads: ReviewThread[];
   threadsError: string | null;
   viewType: ViewType;
@@ -413,6 +415,7 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
         files: loaded.data.files,
         viewer: loaded.data.viewer,
         isSelfReview: loaded.data.isSelfReview,
+        incomplete: loaded.data.incomplete,
         threads,
         threadsError,
         viewType,

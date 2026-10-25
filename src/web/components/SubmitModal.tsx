@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ApiError, api, jsonBody } from '../api';
-import { isInlineRange } from '../lib/diffModel';
+import { classifyDraft } from '../lib/diffModel';
 import { useDrafts, useReview } from '../state';
 import type { LineRange, SubmitEvent, SubmitResult } from '../types';
 
@@ -44,9 +44,12 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
           startLine: d.startLine,
           startSide: d.startSide,
         };
-        return { draft: d, inline: isInlineRange(byPath.get(d.path) ?? [], range) };
+        return {
+          draft: d,
+          kind: classifyDraft({ ...d, ...range }, pr.headSha, byPath.get(d.path) ?? []),
+        };
       });
-  }, [drafts, files]);
+  }, [drafts, files, pr.headSha]);
 
   async function submit(event: SubmitEvent, force = false) {
     setPhase({ kind: 'submitting' });
@@ -74,7 +77,8 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
 
   const busy = phase.kind === 'saving' || phase.kind === 'submitting';
   const done = phase.kind === 'done';
-  const fallbackCount = items.filter((i) => !i.inline).length;
+  const fallbackCount = items.filter((i) => i.kind === 'fallback').length;
+  const outdatedCount = items.filter((i) => i.kind === 'outdated').length;
   const btn = 'rounded px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50';
 
   return (
@@ -112,6 +116,17 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
                 body.
               </p>
             )}
+            {phase.result.outdated.length > 0 && (
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                {phase.result.outdated.length} outdated comment(s) were added to the review body.
+              </p>
+            )}
+            {phase.result.keptDrafts.length > 0 && (
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                {phase.result.keptDrafts.length} draft(s) were edited during submission and were
+                kept as drafts.
+              </p>
+            )}
             <div className="mt-4 text-right">
               <button
                 type="button"
@@ -131,7 +146,7 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
               <p className="py-2 text-sm text-gray-500 dark:text-gray-400">No inline drafts.</p>
             ) : (
               <ul className="mt-1 max-h-64 space-y-1 overflow-y-auto">
-                {items.map(({ draft, inline }) => (
+                {items.map(({ draft, kind }) => (
                   <li
                     key={draft.id}
                     className="rounded border border-gray-200 p-2 text-sm dark:border-gray-700"
@@ -140,9 +155,11 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
                       <span className="min-w-0 flex-1 truncate">
                         {draft.path}:{rangeLabel(draft)}
                       </span>
-                      {!inline && (
+                      {kind !== 'inline' && (
                         <span className="shrink-0 rounded bg-amber-100 px-1.5 font-sans text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
-                          goes in review body
+                          {kind === 'outdated'
+                            ? 'outdated — will go into the review body'
+                            : 'goes in review body'}
                         </span>
                       )}
                     </div>
@@ -155,6 +172,13 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
               <p className="mt-2 text-xs text-amber-800 dark:text-amber-300">
                 {fallbackCount} comment(s) are outside the diff, so GitHub can&apos;t place them
                 inline. They are appended to the review body as <code>path:line — comment</code>.
+              </p>
+            )}
+
+            {outdatedCount > 0 && (
+              <p className="mt-2 text-xs text-amber-800 dark:text-amber-300">
+                {outdatedCount} comment(s) were written against an older head, so their line numbers
+                may not match. They are appended to the review body, never posted inline.
               </p>
             )}
 

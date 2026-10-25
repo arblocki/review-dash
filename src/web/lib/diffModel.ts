@@ -123,6 +123,21 @@ export function isInlineRange(fileHunks: Hunk[], range: LineRange): boolean {
   return isCommentable(fileHunks, range);
 }
 
+export type DraftKind = 'inline' | 'fallback' | 'outdated';
+
+/**
+ * How a draft will be submitted: drafts written against another head go in the review body
+ * (outdated), drafts outside the diff go there too (fallback), the rest are inline comments.
+ */
+export function classifyDraft(
+  draft: { headSha: string } & LineRange & { path: string },
+  currentHeadSha: string,
+  fileHunks: Hunk[],
+): DraftKind {
+  if (draft.headSha !== currentHeadSha) return 'outdated';
+  return isInlineRange(fileHunks, draft) ? 'inline' : 'fallback';
+}
+
 // --- context expansion ---------------------------------------------------------------------
 
 /** File text -> lines, without the phantom empty line after a trailing newline. */
