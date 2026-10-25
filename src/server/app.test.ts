@@ -10,13 +10,8 @@ import { TOKEN_HEADER } from './security.js';
 const TOKEN = 'test-token';
 const PORT = 4321;
 const pr = { owner: 'octocat', repo: 'hello-world', number: 1 };
-const app = createApp({
-  token: TOKEN,
-  pr,
-  port: () => PORT,
-  github: fakeGitHub(),
-  store: openStore(':memory:'),
-});
+const deps = { github: fakeGitHub(), store: openStore(':memory:') };
+const app = createApp({ token: TOKEN, pr, port: () => PORT, ...deps });
 
 function get(path: string, headers: Record<string, string> = {}) {
   return app.request(path, {
@@ -88,7 +83,7 @@ describe('static UI serving', () => {
     const root = mkdtempSync(join(tmpdir(), 'rd-web-'));
     const webDir = join(root, 'web');
     try {
-      const a = createApp({ token: TOKEN, pr, port: () => PORT, webDir });
+      const a = createApp({ token: TOKEN, pr, port: () => PORT, webDir, ...deps });
       expect((await a.request('/', { headers: host })).status).toBe(503);
       expect(
         (await a.request('/api/health', { headers: { ...host, [TOKEN_HEADER]: TOKEN } })).status,
@@ -110,7 +105,7 @@ describe('static UI serving', () => {
     const webDir = mkdtempSync(join(tmpdir(), 'rd-web-'));
     try {
       writeFileSync(join(webDir, 'index.html'), html('old.js'));
-      const a = createApp({ token: TOKEN, pr, port: () => PORT, webDir });
+      const a = createApp({ token: TOKEN, pr, port: () => PORT, webDir, ...deps });
       expect(await (await a.request('/', { headers: host })).text()).toContain('old.js');
 
       writeFileSync(join(webDir, 'index.html'), html('new.js'));
