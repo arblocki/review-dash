@@ -89,21 +89,29 @@ function parseHunks(patch: string): RawHunk[] {
 
 /**
  * Parses one file's patch into hunks with stable IDs.
- * ID = sha1(path + normalized content), so it survives line-number shifts. Two hunks in
- * one file with identical content get an occurrence index mixed in (in file order).
+ * ID = sha1(path + normalized content), so it survives line-number shifts. When the same
+ * content occurs m > 1 times in one file, each copy also mixes in `#i/m` (file order). If the
+ * number of copies changes between pushes, all of their ids change, so reviewed state is not
+ * silently handed from one copy to another; they show up as new instead.
  */
 export function parsePatch(
   file: { path: string; oldPath?: string; status: FileStatus },
   patch: string | undefined,
 ): Hunk[] {
   if (!patch) return [];
+  const parsed = parseHunks(patch).map((h) => ({
+    h,
+    base: `${file.path}\n${normalizeHunk(h.lines)}`,
+  }));
+  const total = new Map<string, number>();
+  for (const { base } of parsed) total.set(base, (total.get(base) ?? 0) + 1);
   const seen = new Map<string, number>();
-  return parseHunks(patch).map((h) => {
-    const base = `${file.path}\n${normalizeHunk(h.lines)}`;
-    const n = seen.get(base) ?? 0;
-    seen.set(base, n + 1);
+  return parsed.map(({ h, base }) => {
+    const m = total.get(base)!;
+    const i = seen.get(base) ?? 0;
+    seen.set(base, i + 1);
     const hunk: Hunk = {
-      id: sha1(n === 0 ? base : `${base}\n#${n}`),
+      id: sha1(m === 1 ? base : `${base}\n#${i}/${m}`),
       path: file.path,
       status: file.status,
       oldStart: h.oldStart,

@@ -123,7 +123,23 @@ describe('hunk ids', () => {
     const [h1, h2] = parsePatch(file, patch);
     expect(h1!.id).not.toBe(h2!.id);
     expect(parsePatch(file, patch).map((h) => h.id)).toEqual([h1!.id, h2!.id]);
-    expect(h1!.id).toBe(parsePatch(file, at(7))[0]!.id);
+    // A lone copy has a different id from either duplicate, so reviewed state for one of
+    // two identical hunks is never carried over to the survivor after the other is removed.
+    const lone = parsePatch(file, at(7))[0]!.id;
+    expect([h1!.id, h2!.id]).not.toContain(lone);
+  });
+
+  it('keeps duplicate ids stable across line shifts while the copy count is unchanged', () => {
+    const before = parsePatch(file, `${at(1)}\n${at(40)}`).map((h) => h.id);
+    const after = parsePatch(file, `${at(5)}\n${at(60)}`).map((h) => h.id);
+    expect(after).toEqual(before);
+  });
+
+  it('changes every duplicate id when the number of copies changes', () => {
+    const two = parsePatch(file, `${at(1)}\n${at(40)}`).map((h) => h.id);
+    const three = parsePatch(file, `${at(1)}\n${at(40)}\n${at(80)}`).map((h) => h.id);
+    expect(three.filter((id) => two.includes(id))).toEqual([]);
+    expect(new Set(three).size).toBe(3);
   });
 });
 
