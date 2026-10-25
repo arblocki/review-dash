@@ -149,8 +149,9 @@ describe('drafts', () => {
     expect(await put({ line: 90, startLine: 100, startSide: 'RIGHT' })).toBe(400);
     // LEFT 100 -> RIGHT 90 is a valid forward range; numbers are not comparable across sides.
     expect(await put({ line: 90, startLine: 100, startSide: 'LEFT' })).toBe(200);
-    // RIGHT start with a LEFT end is not supported.
-    expect(await put({ side: 'LEFT', line: 100, startLine: 90, startSide: 'RIGHT' })).toBe(400);
+    // RIGHT start with a LEFT end is saved (e.g. a context line dragged onto the deleted line
+    // below it); isCommentable() keeps it out of inline comments, so it goes in the body.
+    expect(await put({ side: 'LEFT', line: 100, startLine: 90, startSide: 'RIGHT' })).toBe(200);
   });
 });
 

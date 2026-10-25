@@ -24,13 +24,6 @@ const draftSchema = z
     // Line numbers only compare within one side; cross-side order is checked against the diff.
     (d) => d.startLine === undefined || (d.startSide ?? d.side) !== d.side || d.startLine <= d.line,
     { message: 'startLine must not be after line', path: ['startLine'] },
-  )
-  .refine(
-    (d) => d.startLine === undefined || (d.startSide ?? d.side) !== 'RIGHT' || d.side !== 'LEFT',
-    {
-      message: 'a range cannot start on RIGHT and end on LEFT',
-      path: ['startSide'],
-    },
   );
 
 const reviewSchema = z.object({
