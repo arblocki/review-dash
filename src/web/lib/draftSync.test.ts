@@ -60,6 +60,7 @@ function setup() {
     runSubmit({
       flush: sync.flush,
       post: () => server.api<{ submitted: string[] }>('/api/review', { method: 'POST' }),
+      reload: async () => undefined,
     });
   return { server, sync, add, submit, get: () => drafts };
 }

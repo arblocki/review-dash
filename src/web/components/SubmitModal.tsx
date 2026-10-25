@@ -13,7 +13,7 @@ type Phase =
   | { kind: 'unsynced'; failed: UnsyncedDraft[] }
   | { kind: 'head_moved'; event: SubmitEvent; currentHeadSha: string }
   | { kind: 'error'; message: string }
-  | { kind: 'done'; result: SubmitResult };
+  | { kind: 'done'; result: SubmitResult; refreshError?: string };
 
 const afterFlush = (failed: UnsyncedDraft[]): Phase =>
   failed.length > 0 ? { kind: 'unsynced', failed } : { kind: 'ready' };
@@ -28,6 +28,7 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
   const { pr, files, isSelfReview, flushDrafts, reloadAfterSubmit } = useReview();
   const drafts = useDrafts();
   const [body, setBody] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: 'saving' });
 
   // Make sure the server has the latest text of every draft before listing them.
@@ -62,6 +63,20 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
       });
   }, [drafts, files, pr.headSha]);
 
+  async function retryRefresh() {
+    if (phase.kind !== 'done') return;
+    const { result } = phase;
+    setRefreshing(true);
+    try {
+      await reloadAfterSubmit();
+      setPhase({ kind: 'done', result });
+    } catch (err) {
+      setPhase({ kind: 'done', result, refreshError: (err as Error).message });
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   async function submit(event: SubmitEvent, force = false) {
     setPhase({ kind: 'submitting' });
     try {
@@ -73,14 +88,13 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
             // The head we are showing; the server refuses with head_moved if GitHub has moved on.
             ...jsonBody({ event, body, headSha: pr.headSha, ...(force ? { force: true } : {}) }),
           }),
+        reload: reloadAfterSubmit,
       });
       if (outcome.kind === 'unsynced') {
         setPhase({ kind: 'unsynced', failed: outcome.failed });
         return;
       }
-      const result = outcome.result;
-      await reloadAfterSubmit();
-      setPhase({ kind: 'done', result });
+      setPhase({ kind: 'done', result: outcome.result, refreshError: outcome.refreshError });
     } catch (err) {
       if (err instanceof ApiError && err.code === 'head_moved') {
         setPhase({
@@ -129,6 +143,25 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
                 View the review on GitHub ↗
               </a>
             </p>
+            {phase.refreshError !== undefined && (
+              <div
+                className="mt-2 rounded border border-amber-400 bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+                role="alert"
+                data-testid="refresh-warning"
+              >
+                Review submitted, but refreshing the page data failed: {phase.refreshError}
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    disabled={refreshing}
+                    className={`${btn} bg-amber-600 hover:bg-amber-700`}
+                    onClick={() => void retryRefresh()}
+                  >
+                    {refreshing ? 'Refreshing…' : 'Retry refresh'}
+                  </button>
+                </div>
+              </div>
+            )}
             {phase.result.fallbacks.length > 0 && (
               <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
                 {phase.result.fallbacks.length} comment(s) outside the diff were added to the review
