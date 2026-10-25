@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
 import { TOKEN_HEADER } from './security.js';
@@ -66,5 +69,50 @@ describe('/api/session', () => {
   it('returns the PR being reviewed', async () => {
     const res = await get('/api/session');
     expect(await res.json()).toEqual({ pr, label: 'octocat/hello-world#1' });
+  });
+});
+
+describe('static UI serving', () => {
+  const html = (asset: string) => `<!doctype html><script src="/assets/${asset}"></script>`;
+  const host = { host: `127.0.0.1:${PORT}` };
+
+  it('serves 503 until the UI is built, without recreating the app', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'rd-web-'));
+    const webDir = join(root, 'web');
+    try {
+      const a = createApp({ token: TOKEN, pr, port: () => PORT, webDir });
+      expect((await a.request('/', { headers: host })).status).toBe(503);
+      expect(
+        (await a.request('/api/health', { headers: { ...host, [TOKEN_HEADER]: TOKEN } })).status,
+      ).toBe(200);
+
+      mkdirSync(join(webDir, 'assets'), { recursive: true });
+      writeFileSync(join(webDir, 'index.html'), html('a.js'));
+      writeFileSync(join(webDir, 'assets', 'a.js'), 'console.log(1)');
+      const res = await a.request('/', { headers: host });
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain('a.js');
+      expect((await a.request('/assets/a.js', { headers: host })).status).toBe(200);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('picks up a rebuilt index.html for / and SPA routes', async () => {
+    const webDir = mkdtempSync(join(tmpdir(), 'rd-web-'));
+    try {
+      writeFileSync(join(webDir, 'index.html'), html('old.js'));
+      const a = createApp({ token: TOKEN, pr, port: () => PORT, webDir });
+      expect(await (await a.request('/', { headers: host })).text()).toContain('old.js');
+
+      writeFileSync(join(webDir, 'index.html'), html('new.js'));
+      for (const path of ['/', '/some/spa/route']) {
+        const res = await a.request(path, { headers: host });
+        expect(res.status).toBe(200);
+        expect(await res.text()).toContain('new.js');
+      }
+    } finally {
+      rmSync(webDir, { recursive: true, force: true });
+    }
   });
 });

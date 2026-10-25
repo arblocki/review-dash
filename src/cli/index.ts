@@ -24,10 +24,11 @@ async function main(): Promise<void> {
   const url = `http://127.0.0.1:${server.port}/#token=${server.token}`;
   console.log(`Reviewing ${formatPrRef(opts.pr)}`);
   if (opts.open) {
-    console.log(`Opening ${url}`);
+    console.log(`Opening http://127.0.0.1:${server.port}/ (session token not shown)`);
     await open(url);
   } else {
     console.log(`Open ${url}`);
+    console.log('Note: this URL contains a session token; do not share or log it.');
   }
 
   const shutdown = () => void server.close().then(() => process.exit(0));

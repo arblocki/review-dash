@@ -22,6 +22,10 @@ pnpm start owner/repo#123
 pnpm start https://github.com/owner/repo/pull/123 --port 8080 --no-open
 ```
 
+By default the browser is opened for you. With `--no-open` the full URL is printed. It
+contains a session token (`#token=...`), so don't share or log it. When the browser is
+opened automatically, the printed URL is redacted.
+
 Flags: `--provider`, `--model`, `--port`, `--no-open`, `--debug`.
 
 After `pnpm link --global`, run it as `review-dash owner/repo#123`.

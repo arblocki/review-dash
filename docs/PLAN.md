@@ -33,8 +33,9 @@ that are posted back to GitHub as a normal review.
 ### What success looks like
 - A 2,000-line agent PR reads as roughly 5–15 groups, each one coherent enough to review on
   its own.
-- Mechanical noise (lockfiles, generated code, snapshots, pure renames) collapses into one
-  group that is low risk and can be cleared without reading it.
+- Mechanical noise (generated code, snapshots, pure renames, and lockfile changes that
+  follow a manifest change) collapses into one group that is low risk and can be cleared
+  without reading it. Other lockfile changes get a separate "verify" group instead.
 - Every hunk lands in exactly one group. Nothing can be silently skipped.
 - Review time per PR goes down. Track this informally, just by noting how long reviews take.
 
@@ -116,6 +117,13 @@ under my account count as mine. In that case, hide those buttons and submit as C
   newStart, newLines, header, lines[] }`.
 - **Hunk ID** = `sha1(path + normalized hunk content)`, with line numbers left out, so the
   ID survives rebases that shift lines. This is what reviewed state and caching key on.
+  This holds for hunks whose normalized content is unique within the file. When the same
+  content occurs m>1 times in one file, each occurrence's ID also mixes in its occurrence
+  index and the count (`#i/m`). If the number of identical copies changes between pushes,
+  all of those IDs change and their reviewed state is conservatively NOT carried over (they
+  show up as new), rather than silently re-assigning one copy's reviewed state to another.
+- IDs must be unique per diff: the validator ("every hunk in exactly one group") and
+  reviewed state both rely on it. Duplicate-hunk fixtures are part of the parser tests.
 - Hunks are the units that get grouped. v1 never splits a hunk. v2 may let the LLM split
   an oversized hunk by line range.
 
@@ -130,7 +138,15 @@ Tag each file and hunk using path globs and content checks:
 - Test↔implementation pairing by name (`foo.ts` ↔ `foo.test.ts`, `x.py` ↔ `test_x.py`)
 
 Lockfiles, generated files, snapshots, vendored code, and rename-only changes skip the LLM
-and go straight into a **"Mechanical changes"** group. That saves tokens and noise.
+and are shown in a **"Mechanical changes"** group. That saves tokens and noise.
+
+Lockfiles are not always harmless: resolved versions, transitive deps, and integrity hashes
+can change independently of the manifest. A lockfile change stays in the Mechanical group
+(and is auto-cleared, see 4.6) only when an associated manifest in the same directory also
+changed in the PR and the lockfile hunk does not change integrity/checksum/resolved-source
+lines for an unchanged version. Otherwise it goes into a separate **"Lockfile changes —
+verify"** group: still skips the LLM, but at least medium risk (high when integrity or
+source changes without a version change), and never auto-cleared.
 
 ### 4.3 Pre-group (deterministic)
 Give the LLM candidate clusters instead of a flat list:
@@ -189,7 +205,9 @@ Final risk is the higher of the LLM's rating and the rule-based rating:
   risk level and a reason), the same idea as `REVIEW.md`.
 - The low end is Antique-style **auto-clear**: groups that are all mechanical, docs,
   comments, or whitespace start collapsed and pre-marked as reviewed. Start strict and
-  loosen later.
+  loosen later. Lockfile hunks count as mechanical only under the 4.2 conditions (manifest
+  changed too, no integrity/source change for an unchanged version); otherwise they are in
+  the "Lockfile changes — verify" group and are not auto-cleared.
 
 ### 4.7 Order
 - Groups: risk first (high → medium → low → mechanical), then by `depends_on`

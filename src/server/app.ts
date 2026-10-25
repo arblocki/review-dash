@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { formatPrRef, type PrRef } from '../core/pr-ref.js';
@@ -24,10 +24,20 @@ export function createApp(opts: AppOptions): Hono {
   app.all('/api/*', (c) => c.json({ error: 'not found' }, 404));
 
   const { webDir } = opts;
-  if (webDir && existsSync(webDir)) {
-    const index = readFileSync(`${webDir}/index.html`, 'utf8');
+  if (webDir) {
+    // Mounted even if webDir does not exist yet (`vite build --watch` race); index.html is
+    // read per request so rebuilds are picked up without a restart.
     app.use('*', serveStatic({ root: webDir }));
-    app.get('*', (c) => c.html(index));
+    app.get('*', (c) => {
+      try {
+        return c.html(readFileSync(`${webDir}/index.html`, 'utf8'));
+      } catch {
+        return c.text(
+          'UI not built yet — run `pnpm build` (or wait for `pnpm dev` to finish building)',
+          503,
+        );
+      }
+    });
   }
 
   return app;

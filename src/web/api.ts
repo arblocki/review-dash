@@ -1,12 +1,35 @@
 const TOKEN_HEADER = 'x-review-dash-token';
 
-/** Session token, kept in memory only. */
+const STORAGE_KEY = 'review-dash-token';
+
+/** Session token; persisted in sessionStorage so a reload keeps it. */
 let token = '';
 
-/** Reads `#token=...` from the URL, then strips it from the address bar. */
+type TokenStorage = Pick<Storage, 'getItem' | 'setItem'>;
+
+/** A token in the hash wins and is stored; otherwise fall back to storage. Never throws. */
+export function resolveToken(hash: string, storage: TokenStorage | undefined): string {
+  const fromHash = new URLSearchParams(hash.replace(/^#/, '')).get('token') ?? '';
+  try {
+    if (fromHash) {
+      storage?.setItem(STORAGE_KEY, fromHash);
+      return fromHash;
+    }
+    return storage?.getItem(STORAGE_KEY) ?? '';
+  } catch {
+    return fromHash;
+  }
+}
+
+/** Resolves the token from `#token=...` or sessionStorage, then strips the hash. */
 export function initToken(): void {
-  const params = new URLSearchParams(location.hash.slice(1));
-  token = params.get('token') ?? '';
+  let storage: TokenStorage | undefined;
+  try {
+    storage = sessionStorage;
+  } catch {
+    storage = undefined;
+  }
+  token = resolveToken(location.hash, storage);
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
 }
 
