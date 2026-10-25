@@ -11,6 +11,8 @@ export function Header({ onSubmit }: { onSubmit: () => void }) {
     incomplete,
     refreshing,
     refresh,
+    refreshError,
+    dismissRefreshError,
     viewType,
     setViewType,
     hideWhitespace,
@@ -49,6 +51,25 @@ export function Header({ onSubmit }: { onSubmit: () => void }) {
           >
             Open the files tab ↗
           </a>
+        </div>
+      )}
+      {refreshError !== null && (
+        <div
+          role="alert"
+          data-testid="refresh-error"
+          className="flex items-center gap-2 border-b border-red-300 bg-red-50 px-4 py-1.5 text-sm text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-200"
+        >
+          <span className="min-w-0 flex-1">
+            Refresh failed, showing the previous data: {refreshError}
+          </span>
+          <button
+            type="button"
+            className="shrink-0 rounded px-1.5 hover:bg-red-100 dark:hover:bg-red-900"
+            aria-label="Dismiss"
+            onClick={dismissRefreshError}
+          >
+            ✕
+          </button>
         </div>
       )}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2">

@@ -64,6 +64,9 @@ export interface ReviewContextValue {
   setHideWhitespace(v: boolean): void;
   refreshing: boolean;
   refresh(): Promise<void>;
+  /** Why the last manual refresh failed (existing data is kept); cleared by the next success. */
+  refreshError: string | null;
+  dismissRefreshError(): void;
   /** Lines of a file at a ref (cached). */
   fetchFile(path: string, ref: string): Promise<string[]>;
   /** Creates an empty local draft and returns its id. Nothing is saved until it has text. */
@@ -146,6 +149,7 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
   const [threadsError, setThreadsError] = useState<string | null>(null);
   const [drafts, setDraftsState] = useState<LocalDraft[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [viewType, setViewType] = usePersistentState<ViewType>('viewType', 'unified');
   const [hideWhitespace, setHideWhitespace] = usePersistentState('hideWhitespace', false);
 
@@ -214,10 +218,15 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
       const [data] = await Promise.all([api<PrResponse>('/api/pr?refresh=1'), loadThreads()]);
       fileCache.current.clear();
       setLoaded((l) => (l ? { ...l, data } : l));
+      setRefreshError(null);
+    } catch (err) {
+      setRefreshError((err as Error).message);
     } finally {
       setRefreshing(false);
     }
   }, [loadThreads]);
+
+  const dismissRefreshError = useCallback(() => setRefreshError(null), []);
 
   const fetchFile = useCallback((path: string, ref: string) => {
     const key = `${ref}:${path}`;
@@ -325,6 +334,8 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
         setHideWhitespace,
         refreshing,
         refresh,
+        refreshError,
+        dismissRefreshError,
         fetchFile,
         startDraft,
         updateDraftBody,
@@ -343,6 +354,8 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
       setHideWhitespace,
       refreshing,
       refresh,
+      refreshError,
+      dismissRefreshError,
       fetchFile,
       startDraft,
       updateDraftBody,
