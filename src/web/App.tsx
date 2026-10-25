@@ -1,27 +1,39 @@
-import { useEffect, useState } from 'react';
-import { api } from './api';
+import { useState } from 'react';
+import { FileList } from './components/FileList';
+import { AllFilesDiff } from './components/HunkList';
+import { Header } from './components/Header';
+import { Layout } from './components/Layout';
+import { SubmitModal } from './components/SubmitModal';
+import { ReviewProvider, useReview } from './state';
 
-interface Session {
-  label: string;
+function Review() {
+  const { files, threadsError } = useReview();
+  const [submitting, setSubmitting] = useState(false);
+  return (
+    <>
+      <Layout
+        header={<Header onSubmit={() => setSubmitting(true)} />}
+        rail={<FileList files={files} />}
+        main={
+          <>
+            {threadsError && (
+              <p className="mb-3 rounded bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                Existing review threads could not be loaded: {threadsError}
+              </p>
+            )}
+            <AllFilesDiff />
+          </>
+        }
+      />
+      {submitting && <SubmitModal onClose={() => setSubmitting(false)} />}
+    </>
+  );
 }
 
 export function App() {
-  const [session, setSession] = useState<Session | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api<Session>('/api/session').then(setSession, (err: Error) => setError(err.message));
-  }, []);
-
   return (
-    <main className="mx-auto max-w-3xl p-8">
-      <h1 className="text-2xl font-semibold">review-dash</h1>
-      {error && <p className="mt-4 text-red-600">Failed to load session: {error}</p>}
-      {session && (
-        <p className="mt-4 text-gray-700">
-          Reviewing <code className="rounded bg-gray-100 px-1.5 py-0.5">{session.label}</code>
-        </p>
-      )}
-    </main>
+    <ReviewProvider>
+      <Review />
+    </ReviewProvider>
   );
 }

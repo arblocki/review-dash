@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { initToken } from './api';
 import { App } from './App';
+import 'react-diff-view/style/index.css';
 import './index.css';
 
 initToken();
