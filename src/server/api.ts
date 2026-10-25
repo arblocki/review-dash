@@ -115,6 +115,7 @@ export function registerApi(app: Hono, { pr: ref, github, store }: ApiDeps): voi
       diffHash: d.diffHash,
       viewer: d.viewer,
       isSelfReview: d.isSelfReview,
+      ...(d.incomplete ? { incomplete: d.incomplete } : {}),
     });
   });
 

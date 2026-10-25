@@ -57,6 +57,19 @@ describe('GET /api/pr', () => {
     expect(json.files[3].patchMissing).toBe(true);
   });
 
+  it('flags a PR whose files exceed what GitHub lists, without failing', async () => {
+    const fx = loadFixture();
+    const { call } = setup({ pr: { ...fx.pr, changedFiles: 3200 } });
+    const res = await call('GET', '/api/pr');
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.incomplete).toMatchObject({ fetchedFiles: 4, changedFiles: 3200 });
+    expect(json.incomplete.reason).toMatch(/3,000/);
+    expect(json.files).toHaveLength(4);
+    const complete = await (await setup().call('GET', '/api/pr')).json();
+    expect(complete).not.toHaveProperty('incomplete');
+  });
+
   it('caches per run and refetches on ?refresh=1', async () => {
     const { call, github } = setup();
     await call('GET', '/api/pr');
