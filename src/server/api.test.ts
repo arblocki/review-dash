@@ -164,6 +164,9 @@ describe('POST /api/review', () => {
     });
     expect(forced.status).toBe(200);
     expect(github.calls.submitReview[0]?.headSha).toBe('3333333333333333333333333333333333333333');
+    expect(github.calls.submitReview[0]?.comments).toEqual([]);
+    expect(github.calls.submitReview[0]?.body).toContain('(outdated: written against');
+    expect((await forced.json()).outdated).toHaveLength(1);
   });
 
   it('returns 409 for a bare approval after a new push, with no drafts at all', async () => {

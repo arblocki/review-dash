@@ -167,7 +167,11 @@ export function registerApi(app: Hono, { pr: ref, github, store }: ApiDeps): voi
       ref,
       built.included.map((d) => d.id),
     );
-    return c.json({ reviewUrl: submitted.url, fallbacks: built.fallbacks });
+    return c.json({
+      reviewUrl: submitted.url,
+      fallbacks: built.fallbacks,
+      outdated: built.outdated,
+    });
   });
 
   app.post('/api/threads/:commentId/replies', async (c) => {

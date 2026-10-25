@@ -34,7 +34,12 @@ export interface BuiltReview {
   payload: SubmitReviewInput;
   /** Drafts outside the diff hunks that were folded into the review body. */
   fallbacks: Draft[];
-  /** Every draft that went into the review (inline or fallback). */
+  /**
+   * Drafts written against an older head. Their coordinates are ambiguous against the current
+   * diff, so they are never posted inline; they go in the body with an outdated label.
+   */
+  outdated: Draft[];
+  /** Every draft that went into the review (inline, fallback or outdated). */
   included: Draft[];
 }
 
@@ -69,7 +74,14 @@ export function buildReview(input: BuildReviewInput): BuiltReview {
   const hunksByPath = new Map(files.map((f) => [f.path, f.hunks]));
   const comments: ReviewComment[] = [];
   const fallbacks: Draft[] = [];
+  const outdated: Draft[] = [];
   for (const d of drafts) {
+    // `force` only means "submit deliberately": it must not reuse line numbers from another head.
+    // A later layer that re-anchors a draft updates its headSha, which makes it inline again.
+    if (d.headSha !== currentHeadSha) {
+      outdated.push(d);
+      continue;
+    }
     const ok = isCommentable(hunksByPath.get(d.path) ?? [], {
       line: d.line,
       side: d.side,
@@ -88,10 +100,14 @@ export function buildReview(input: BuildReviewInput): BuiltReview {
     comments.push(c);
   }
 
-  const extra = fallbacks.map((d) => {
-    const range = d.startLine !== undefined ? `${d.startLine}-${d.line}` : `${d.line}`;
-    return `\`${d.path}:${range}\` — ${d.body}`;
-  });
+  const location = (d: Draft) =>
+    `\`${d.path}:${d.startLine !== undefined ? `${d.startLine}-${d.line}` : d.line}\``;
+  const extra = [
+    ...fallbacks.map((d) => `${location(d)} — ${d.body}`),
+    ...outdated.map(
+      (d) => `${location(d)} (outdated: written against ${d.headSha.slice(0, 7)}) — ${d.body}`,
+    ),
+  ];
   const body = [input.body.trim(), ...extra].filter(Boolean).join('\n\n');
 
   if (comments.length === 0 && body === '' && event !== 'APPROVE') {
@@ -105,6 +121,7 @@ export function buildReview(input: BuildReviewInput): BuiltReview {
   return {
     payload: { headSha: currentHeadSha, event, body, comments },
     fallbacks,
+    outdated,
     included: drafts,
   };
 }

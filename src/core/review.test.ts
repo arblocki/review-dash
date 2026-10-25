@@ -96,6 +96,19 @@ describe('buildReview', () => {
     expect(r.payload.headSha).toBe(HEAD);
   });
 
+  it('never posts drafts from an older head inline, even when forced', () => {
+    const old = draft({ id: 'o', headSha: 'abc1234def', line: 2, body: 'stale' });
+    const cur = draft({ id: 'c', line: 99, body: 'out' });
+    const r = buildReview(input({ drafts: [draft({ id: 'k' }), old, cur], force: true }));
+    expect(r.payload.comments.map((c) => c.body)).toEqual(['nit']);
+    expect(r.outdated.map((d) => d.id)).toEqual(['o']);
+    expect(r.fallbacks.map((d) => d.id)).toEqual(['c']);
+    expect(r.included).toHaveLength(3);
+    expect(r.payload.body).toBe(
+      '`src/greet.ts:99` — out\n\n`src/greet.ts:2` (outdated: written against abc1234) — stale',
+    );
+  });
+
   it('returns a 409 for a bare approval when the reviewed head is not the current head', () => {
     const moved = input({ drafts: [], event: 'APPROVE', reviewedHeadSha: 'old' });
     expect(() => buildReview(moved)).toThrow(
