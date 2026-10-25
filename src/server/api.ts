@@ -28,6 +28,8 @@ const draftSchema = z
 const reviewSchema = z.object({
   event: z.enum(['COMMENT', 'APPROVE', 'REQUEST_CHANGES']),
   body: z.string().default(''),
+  /** Head SHA of the diff the client was displaying. */
+  headSha: z.string().min(1),
   force: z.boolean().optional(),
 });
 
@@ -137,7 +139,7 @@ export function registerApi(app: Hono, { pr: ref, github, store }: ApiDeps): voi
   app.post('/api/review', async (c) => {
     const body = await parseBody(c, reviewSchema);
     if ('error' in body) return c.json({ error: body.error }, 400);
-    const { event, force } = body.data;
+    const { event, force, headSha: reviewedHeadSha } = body.data;
 
     // Always compare against the live head, and map comments against the live diff.
     const cachedData = await getData();
@@ -152,6 +154,7 @@ export function registerApi(app: Hono, { pr: ref, github, store }: ApiDeps): voi
       viewer: data.viewer,
       prAuthor: data.pr.author,
       currentHeadSha: live.headSha,
+      reviewedHeadSha,
       force,
     });
     const submitted = await github.submitReview(ref, built.payload);

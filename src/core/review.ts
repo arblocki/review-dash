@@ -25,6 +25,8 @@ export interface BuildReviewInput {
   viewer: string;
   prAuthor: string;
   currentHeadSha: string;
+  /** Head SHA of the diff the reviewer was looking at when they clicked submit. */
+  reviewedHeadSha: string;
   force?: boolean;
 }
 
@@ -48,14 +50,16 @@ export function buildReview(input: BuildReviewInput): BuiltReview {
     );
   }
 
+  // Checked even with no drafts: a bare approval must not land on commits nobody looked at.
   const stale = drafts.filter((d) => d.headSha !== currentHeadSha);
-  if (stale.length > 0 && !input.force) {
+  if ((input.reviewedHeadSha !== currentHeadSha || stale.length > 0) && !input.force) {
     throw new ReviewError(
       'head_moved',
       409,
-      'The PR head moved since these drafts were written. Reload, or submit with force.',
+      'The PR head moved since you loaded it. Reload to review the new commits, or submit with force.',
       {
         currentHeadSha,
+        reviewedHeadSha: input.reviewedHeadSha,
         draftHeadShas: [...new Set(stale.map((d) => d.headSha))],
         staleDraftIds: stale.map((d) => d.id),
       },

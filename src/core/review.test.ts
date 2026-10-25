@@ -29,6 +29,7 @@ function input(over: Partial<BuildReviewInput> = {}): BuildReviewInput {
     viewer: 'reviewer',
     prAuthor: 'octocat',
     currentHeadSha: HEAD,
+    reviewedHeadSha: HEAD,
     ...over,
   };
 }
@@ -93,6 +94,17 @@ describe('buildReview', () => {
     }
     const r = buildReview(input({ drafts: stale, force: true }));
     expect(r.payload.headSha).toBe(HEAD);
+  });
+
+  it('returns a 409 for a bare approval when the reviewed head is not the current head', () => {
+    const moved = input({ drafts: [], event: 'APPROVE', reviewedHeadSha: 'old' });
+    expect(() => buildReview(moved)).toThrow(
+      expect.objectContaining({ status: 409, code: 'head_moved' }),
+    );
+    expect(() => buildReview({ ...moved, event: 'COMMENT', body: 'lgtm' })).toThrow(
+      expect.objectContaining({ code: 'head_moved' }),
+    );
+    expect(buildReview({ ...moved, force: true }).payload.headSha).toBe(HEAD);
   });
 
   it('refuses an empty review but allows a bare approval', () => {

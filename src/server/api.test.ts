@@ -133,7 +133,11 @@ describe('POST /api/review', () => {
     const { call, github } = setup();
     await call('PUT', '/api/drafts', draft);
     await call('PUT', '/api/drafts', { ...draft, line: 99, body: 'outside' });
-    const res = await call('POST', '/api/review', { event: 'COMMENT', body: 'overall' });
+    const res = await call('POST', '/api/review', {
+      event: 'COMMENT',
+      body: 'overall',
+      headSha: HEAD,
+    });
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.reviewUrl).toContain('pullrequestreview-42');
@@ -149,19 +153,37 @@ describe('POST /api/review', () => {
     const { call, github } = setup();
     await call('PUT', '/api/drafts', draft);
     github.setHead('3333333333333333333333333333333333333333');
-    const res = await call('POST', '/api/review', { event: 'COMMENT' });
+    const res = await call('POST', '/api/review', { event: 'COMMENT', headSha: HEAD });
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ code: 'head_moved' });
     expect(github.calls.submitReview).toHaveLength(0);
-    const forced = await call('POST', '/api/review', { event: 'COMMENT', force: true });
+    const forced = await call('POST', '/api/review', {
+      event: 'COMMENT',
+      headSha: HEAD,
+      force: true,
+    });
     expect(forced.status).toBe(200);
     expect(github.calls.submitReview[0]?.headSha).toBe('3333333333333333333333333333333333333333');
+  });
+
+  it('returns 409 for a bare approval after a new push, with no drafts at all', async () => {
+    const { call, github } = setup();
+    await call('GET', '/api/pr');
+    github.setHead('3333333333333333333333333333333333333333');
+    const res = await call('POST', '/api/review', { event: 'APPROVE', headSha: HEAD });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      code: 'head_moved',
+      reviewedHeadSha: HEAD,
+      currentHeadSha: '3333333333333333333333333333333333333333',
+    });
+    expect(github.calls.submitReview).toHaveLength(0);
   });
 
   it('rejects APPROVE on a self-review', async () => {
     const { call, github } = setup({ viewer: 'octocat' });
     await call('PUT', '/api/drafts', draft);
-    const res = await call('POST', '/api/review', { event: 'APPROVE' });
+    const res = await call('POST', '/api/review', { event: 'APPROVE', headSha: HEAD });
     expect(res.status).toBe(422);
     expect(await res.json()).toMatchObject({ code: 'self_review' });
     expect(github.calls.submitReview).toHaveLength(0);
@@ -170,6 +192,7 @@ describe('POST /api/review', () => {
 
   it('validates the event', async () => {
     const { call } = setup();
-    expect((await call('POST', '/api/review', { event: 'NOPE' })).status).toBe(400);
+    expect((await call('POST', '/api/review', { event: 'NOPE', headSha: HEAD })).status).toBe(400);
+    expect((await call('POST', '/api/review', { event: 'APPROVE' })).status).toBe(400);
   });
 });
