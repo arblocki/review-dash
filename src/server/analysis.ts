@@ -37,7 +37,10 @@ interface RouteDeps {
 function status(err: unknown): { status: 400 | 409 | 500 | 504; code: string } {
   if (err instanceof ConfigError) return { status: 409, code: 'config' };
   if (err instanceof LlmError) {
-    if (err.kind === 'not_installed' || err.kind === 'auth') return { status: 409, code: err.kind };
+    // The user can fix these locally (install, log in, or upgrade the CLI), so not a 5xx.
+    if (err.kind === 'not_installed' || err.kind === 'auth' || err.kind === 'unsupported') {
+      return { status: 409, code: err.kind };
+    }
     if (err.kind === 'timeout') return { status: 504, code: err.kind };
     return { status: 500, code: err.kind };
   }

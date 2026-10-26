@@ -143,10 +143,11 @@ describe('GET /api/analysis', () => {
     expect((await get('/api/analysis')).status).toBe(200);
   });
 
-  it('returns 409 with a code for not_installed / auth, 500 otherwise', async () => {
+  it('returns 409 with a code for not_installed / auth / unsupported, 500 otherwise', async () => {
     for (const [kind, status] of [
       ['not_installed', 409],
       ['auth', 409],
+      ['unsupported', 409],
       ['http', 500],
     ] as const) {
       const { get } = setup(() => new FakeProvider([new LlmError(kind, `boom ${kind}`)]));
