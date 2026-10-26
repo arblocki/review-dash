@@ -8,7 +8,8 @@ const FULL_HELP = `Options:
   --append-system-prompt <prompt>
   --system-prompt <prompt>
   --json-schema <schema>
-  --tools <tools...>`;
+  --tools <tools...>
+  --strict-mcp-config`;
 const OLD_HELP = `Options:
   --allowedTools <tools...>
   --append-system-prompt <prompt>`;
@@ -54,6 +55,7 @@ describe('ClaudeCliProvider', () => {
       'SYS',
       '--json-schema',
       JSON.stringify(schema),
+      '--strict-mcp-config',
       '--tools',
       '',
     ]);
@@ -65,20 +67,43 @@ describe('ClaudeCliProvider', () => {
     await provider.complete({ system: 's', prompt: 'p', cwd: '/repo' });
     const run = calls[1]!;
     expect(run.cwd).toBe('/repo');
-    expect(run.args).toContain('Read,Grep,Glob');
+    expect(run.args).toContain('--strict-mcp-config');
+    expect(run.args).not.toContain('--mcp-config');
+    const i = run.args.indexOf('--tools');
+    expect(run.args.slice(i, i + 2)).toEqual(['--tools', 'Read,Grep,Glob']);
+    const j = run.args.indexOf('--allowedTools');
+    expect(run.args.slice(j, j + 2)).toEqual(['--allowedTools', 'Read,Grep,Glob']);
     expect(run.args.join(' ')).not.toMatch(/Bash|Edit|Write/);
   });
 
-  it('falls back when flags are missing and runs --help only once', async () => {
-    const { provider, calls } = setup(OLD_HELP, { stdout: envelope() });
+  it('degrades optional flags but runs --help only once', async () => {
+    const help = `${FULL_HELP.replace('  --json-schema <schema>\n', '').replace('  --system-prompt <prompt>\n', '')}`;
+    const { provider, calls } = setup(help, { stdout: envelope() });
     await provider.complete({ system: 's', prompt: 'p', jsonSchema: {} });
     await provider.complete({ system: 's', prompt: 'p' });
     expect(calls.filter((c) => c.args[0] === '--help')).toHaveLength(1);
     const args = calls[1]!.args;
     expect(args).toContain('--append-system-prompt');
     expect(args).not.toContain('--json-schema');
-    expect(args).not.toContain('--tools');
-    expect(args.slice(-2)).toEqual(['--allowedTools', '']);
+    expect(args).not.toContain('--allowedTools');
+  });
+
+  it('fails closed when --tools is unsupported, spawning only --help', async () => {
+    const { provider, calls } = setup(OLD_HELP, { stdout: envelope() });
+    const err = await provider.complete({ system: '', prompt: 'p' }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ kind: 'unsupported' });
+    expect((err as Error).message).toMatch(/--tools.*upgrade the claude CLI/);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.args).toEqual(['--help']);
+  });
+
+  it('fails closed when --strict-mcp-config is unsupported', async () => {
+    const help = FULL_HELP.replace('  --strict-mcp-config', '');
+    const { provider, calls } = setup(help, { stdout: envelope() });
+    const err = await provider.complete({ system: '', prompt: 'p', cwd: '/r' }).catch((e) => e);
+    expect(err).toMatchObject({ kind: 'unsupported' });
+    expect((err as Error).message).toContain('--strict-mcp-config');
+    expect(calls).toHaveLength(1);
   });
 
   it('prefers structured_output when present', async () => {

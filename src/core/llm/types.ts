@@ -32,7 +32,8 @@ export interface LlmProvider {
   complete(req: LlmRequest): Promise<LlmResult>;
 }
 
-export type LlmErrorKind = 'not_installed' | 'auth' | 'timeout' | 'bad_output' | 'http' | 'aborted';
+export type LlmErrorKind =
+  'not_installed' | 'auth' | 'timeout' | 'bad_output' | 'http' | 'aborted' | 'unsupported';
 
 export class LlmError extends Error {
   readonly kind: LlmErrorKind;

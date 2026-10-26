@@ -18,6 +18,7 @@ interface Caps {
   systemPrompt: '--system-prompt' | '--append-system-prompt' | null;
   jsonSchema: boolean;
   tools: boolean;
+  strictMcpConfig: boolean;
   allowedTools: boolean;
 }
 
@@ -48,6 +49,7 @@ export class ClaudeCliProvider implements LlmProvider {
             : null,
         jsonSchema: hasFlag(help, '--json-schema'),
         tools: hasFlag(help, '--tools'),
+        strictMcpConfig: hasFlag(help, '--strict-mcp-config'),
         allowedTools: hasFlag(help, '--allowedTools') || hasFlag(help, '--allowed-tools'),
       };
     });
@@ -59,18 +61,31 @@ export class ClaudeCliProvider implements LlmProvider {
   /** Exposed for tests. */
   async buildArgs(req: LlmRequest): Promise<string[]> {
     const caps = await this.detect();
+    // Fail closed: without these flags we cannot guarantee a read-only, MCP-free run.
+    const missing = [
+      !caps.tools && '--tools',
+      !caps.strictMcpConfig && '--strict-mcp-config',
+    ].filter(Boolean);
+    if (missing.length) {
+      throw new LlmError(
+        'unsupported',
+        `claude CLI does not support ${missing.join(' and ')}, which are required to run read-only; upgrade the claude CLI`,
+      );
+    }
     const args = ['-p', '--output-format', 'json', '--model', this.opts.model];
     if (caps.systemPrompt && req.system) args.push(caps.systemPrompt, req.system);
     if (req.jsonSchema && caps.jsonSchema)
       args.push('--json-schema', JSON.stringify(req.jsonSchema));
+    // Ignore the user's MCP config; with no --mcp-config passed, no MCP servers load.
+    args.push('--strict-mcp-config');
+    // --tools restricts the available set; --allowedTools alone would only pre-approve.
     // Read-only tools only, and only when a checkout is provided. Never Bash/Edit/Write.
     if (req.cwd) {
-      if (caps.tools) args.push('--tools', READ_TOOLS);
+      args.push('--tools', READ_TOOLS);
+      // Pre-approval is still needed in -p mode so the read tools aren't denied.
       if (caps.allowedTools) args.push('--allowedTools', READ_TOOLS);
-    } else if (caps.tools) {
+    } else {
       args.push('--tools', '');
-    } else if (caps.allowedTools) {
-      args.push('--allowedTools', '');
     }
     return args;
   }
