@@ -6,6 +6,7 @@ export interface SpawnCall {
   args: string[];
   cwd?: string;
   stdin: string;
+  detached?: boolean;
 }
 
 export interface FakeProc {
@@ -16,6 +17,8 @@ export interface FakeProc {
   error?: NodeJS.ErrnoException;
   /** Never exit (for timeout/abort tests). */
   hang?: boolean;
+  /** With `hang`: ignore SIGTERM (only SIGKILL ends the process). */
+  ignoreSigterm?: boolean;
   /** Called when the process "runs"; may write files named in args. */
   onRun?: (call: SpawnCall) => void | Promise<void>;
 }
@@ -25,7 +28,9 @@ export function fakeSpawn(handler: (call: SpawnCall) => FakeProc) {
   const calls: SpawnCall[] = [];
   const killed: string[] = [];
   const spawnFn: SpawnFn = (command, args, opts) => {
-    const call: SpawnCall = { command, args, cwd: opts.cwd, stdin: '' };
+    const call: SpawnCall = { command, args, cwd: opts.cwd, stdin: '', detached: opts.detached };
+    let spec: FakeProc = {};
+    let exited = false;
     calls.push(call);
     const ee = new EventEmitter();
     const out = new EventEmitter();
@@ -34,7 +39,7 @@ export function fakeSpawn(handler: (call: SpawnCall) => FakeProc) {
       stdin: {
         write: (c: string) => void (call.stdin += c),
         end: () => {
-          const spec = handler(call);
+          spec = handler(call);
           setImmediate(async () => {
             if (spec.hang) return;
             if (spec.error) return void ee.emit('error', spec.error);
@@ -48,7 +53,15 @@ export function fakeSpawn(handler: (call: SpawnCall) => FakeProc) {
       },
       stdout: out,
       stderr: err,
-      kill: (sig?: string) => void killed.push(sig ?? 'SIGTERM'),
+      kill: (sig: string = 'SIGTERM') => {
+        killed.push(sig);
+        if (exited || (sig === 'SIGTERM' && spec.ignoreSigterm)) return;
+        exited = true;
+        setImmediate(() => {
+          ee.emit('exit', null, sig);
+          ee.emit('close', null, sig);
+        });
+      },
     }) as unknown as ChildLike;
     return child;
   };

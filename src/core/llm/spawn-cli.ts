@@ -11,14 +11,15 @@ export interface ChildLike {
   stdout: { on(ev: 'data', cb: (chunk: Buffer | string) => void): unknown };
   stderr: { on(ev: 'data', cb: (chunk: Buffer | string) => void): unknown };
   on(ev: 'error', cb: (e: NodeJS.ErrnoException) => void): unknown;
-  on(ev: 'close', cb: (code: number | null, signal: string | null) => void): unknown;
+  on(ev: 'close' | 'exit', cb: (code: number | null, signal: string | null) => void): unknown;
+  pid?: number;
   kill(signal?: NodeJS.Signals): unknown;
 }
 
 export type SpawnFn = (
   command: string,
   args: string[],
-  opts: { cwd?: string; env?: NodeJS.ProcessEnv },
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv; detached?: boolean },
 ) => ChildLike;
 
 export const defaultSpawn: SpawnFn = (command, args, opts) =>
@@ -33,6 +34,8 @@ export interface SpawnCliOptions {
   signal?: AbortSignal;
   /** Max bytes kept per stream (default 16 MiB); excess is dropped. */
   maxBytes?: number;
+  /** After SIGTERM on timeout/abort, wait this long before SIGKILL (default 2000ms). */
+  killGraceMs?: number;
   spawnFn?: SpawnFn;
 }
 
@@ -44,11 +47,16 @@ export interface SpawnCliResult {
 
 export const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_MAX_BYTES = 16 * 1024 * 1024;
+export const DEFAULT_KILL_GRACE_MS = 2000;
+/** How long to wait for the child to be reaped after SIGKILL before giving up. */
+const POST_KILL_WAIT_MS = 1000;
+const POSIX = process.platform !== 'win32';
 
 export function spawnCli(opts: SpawnCliOptions): Promise<SpawnCliResult> {
   const { command, args, input, cwd, signal } = opts;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
+  const killGraceMs = opts.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
   const spawnFn = opts.spawnFn ?? defaultSpawn;
 
   return new Promise((resolve, reject) => {
@@ -58,7 +66,8 @@ export function spawnCli(opts: SpawnCliOptions): Promise<SpawnCliResult> {
     }
     let child: ChildLike;
     try {
-      child = spawnFn(command, args, { cwd });
+      // On POSIX the child leads its own process group so we can signal descendants too.
+      child = spawnFn(command, args, { cwd, detached: POSIX });
     } catch (err) {
       reject(mapSpawnError(command, err as NodeJS.ErrnoException));
       return;
@@ -68,18 +77,44 @@ export function spawnCli(opts: SpawnCliOptions): Promise<SpawnCliResult> {
     let stderr = '';
     let settled = false;
     let timer: NodeJS.Timeout | undefined;
+    let graceTimer: NodeJS.Timeout | undefined;
+    let hardTimer: NodeJS.Timeout | undefined;
+    let stopping: LlmError | undefined;
 
     const finish = (fn: () => void) => {
       if (settled) return;
       settled = true;
-      if (timer) clearTimeout(timer);
+      clearTimeout(timer);
+      clearTimeout(graceTimer);
+      clearTimeout(hardTimer);
       signal?.removeEventListener('abort', onAbort);
       fn();
     };
-    const onAbort = () => {
-      child.kill('SIGTERM');
-      finish(() => reject(new LlmError('aborted', `${command} aborted`)));
+    const killTree = (sig: NodeJS.Signals) => {
+      try {
+        if (POSIX && child.pid) process.kill(-child.pid, sig);
+        else child.kill(sig);
+      } catch {
+        try {
+          child.kill(sig);
+        } catch {
+          /* already gone */
+        }
+      }
     };
+    // SIGTERM, then SIGKILL after the grace period; reject only once the child is gone.
+    const stop = (err: LlmError) => {
+      if (settled || stopping) return;
+      stopping = err;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      killTree('SIGTERM');
+      graceTimer = setTimeout(() => {
+        killTree('SIGKILL');
+        hardTimer = setTimeout(() => finish(() => reject(err)), POST_KILL_WAIT_MS);
+      }, killGraceMs);
+    };
+    const onAbort = () => stop(new LlmError('aborted', `${command} aborted`));
 
     const append = (cur: string, chunk: Buffer | string) =>
       cur.length >= maxBytes ? cur : (cur + chunk.toString()).slice(0, maxBytes);
@@ -88,15 +123,20 @@ export function spawnCli(opts: SpawnCliOptions): Promise<SpawnCliResult> {
     child.stdin.on('error', () => {
       /* process may exit before reading stdin; surfaced via close/error */
     });
-    child.on('error', (err) => finish(() => reject(mapSpawnError(command, err))));
-    child.on('close', (code) => finish(() => resolve({ stdout, stderr, code })));
+    child.on('error', (err) => finish(() => reject(stopping ?? mapSpawnError(command, err))));
+    child.on('exit', () => {
+      if (stopping) finish(() => reject(stopping));
+    });
+    child.on('close', (code) =>
+      finish(() => (stopping ? reject(stopping) : resolve({ stdout, stderr, code }))),
+    );
 
     signal?.addEventListener('abort', onAbort, { once: true });
     if (Number.isFinite(timeoutMs)) {
-      timer = setTimeout(() => {
-        child.kill('SIGTERM');
-        finish(() => reject(new LlmError('timeout', `${command} timed out after ${timeoutMs}ms`)));
-      }, timeoutMs);
+      timer = setTimeout(
+        () => stop(new LlmError('timeout', `${command} timed out after ${timeoutMs}ms`)),
+        timeoutMs,
+      );
     }
 
     if (input !== undefined) child.stdin.write(input);
