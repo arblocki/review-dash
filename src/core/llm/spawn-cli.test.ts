@@ -1,6 +1,8 @@
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { fakeSpawn } from './fake-spawn.testutil.js';
-import { defaultSpawn, spawnCli, type SpawnFn } from './spawn-cli.js';
+import { defaultSpawn, liveProcessGroups, spawnCli, type SpawnFn } from './spawn-cli.js';
 
 const alive = (pid: number) => {
   try {
@@ -102,6 +104,37 @@ describe('spawnCli termination', () => {
     // The orphaned grandchild is reaped by init, which may lag slightly.
     await vi.waitFor(() => expect(alive(grandPid)).toBe(false), { timeout: 5000 });
   });
+
+  it('tracks running children and forgets them once they finish', async () => {
+    const run = spawnCli({ command: process.execPath, args: ['-e', 'setTimeout(() => {}, 200)'] });
+    await vi.waitFor(() => expect(liveProcessGroups().size).toBe(1));
+    await run;
+    expect(liveProcessGroups().size).toBe(0);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'kills still-running children when this process exits',
+    async () => {
+      // A separate Node process starts a long-running CLI child, prints its pid, then exits.
+      const mod = fileURLToPath(new URL('./spawn-cli.ts', import.meta.url));
+      const script = `
+        import { spawnCli, liveProcessGroups } from ${JSON.stringify(mod)};
+        spawnCli({ command: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'], timeoutMs: 60000 }).catch(() => {});
+        setTimeout(() => { console.log([...liveProcessGroups()][0]); process.exit(0); }, 300);
+      `;
+      const out = execFileSync(
+        process.execPath,
+        ['--import', 'tsx', '--input-type=module', '-e', script],
+        {
+          encoding: 'utf8',
+        },
+      );
+      const pid = Number(out.trim());
+      expect(pid).toBeGreaterThan(0);
+      await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 5000 });
+    },
+    15_000,
+  );
 
   it('spawns detached on POSIX only', async () => {
     const { spawnFn, calls } = fakeSpawn(() => ({}));

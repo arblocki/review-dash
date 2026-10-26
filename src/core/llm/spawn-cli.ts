@@ -52,6 +52,32 @@ export const DEFAULT_KILL_GRACE_MS = 2000;
 const POST_KILL_WAIT_MS = 1000;
 const POSIX = process.platform !== 'win32';
 
+/**
+ * Process groups of children still running. Detached children don't get the terminal's
+ * SIGINT when review-dash is stopped, so kill them when this process exits.
+ */
+const liveGroups = new Set<number>();
+let exitHookInstalled = false;
+function trackGroup(pid: number): void {
+  liveGroups.add(pid);
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  process.once('exit', () => {
+    for (const g of liveGroups) {
+      try {
+        process.kill(-g, 'SIGKILL');
+      } catch {
+        /* already gone */
+      }
+    }
+  });
+}
+
+/** Exposed for tests. */
+export function liveProcessGroups(): ReadonlySet<number> {
+  return liveGroups;
+}
+
 export function spawnCli(opts: SpawnCliOptions): Promise<SpawnCliResult> {
   const { command, args, input, cwd, signal } = opts;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -72,6 +98,8 @@ export function spawnCli(opts: SpawnCliOptions): Promise<SpawnCliResult> {
       reject(mapSpawnError(command, err as NodeJS.ErrnoException));
       return;
     }
+    const group = POSIX ? child.pid : undefined;
+    if (group) trackGroup(group);
 
     let stdout = '';
     let stderr = '';
@@ -84,6 +112,7 @@ export function spawnCli(opts: SpawnCliOptions): Promise<SpawnCliResult> {
     const finish = (fn: () => void) => {
       if (settled) return;
       settled = true;
+      if (group) liveGroups.delete(group);
       clearTimeout(timer);
       clearTimeout(graceTimer);
       clearTimeout(hardTimer);
