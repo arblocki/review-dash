@@ -56,10 +56,31 @@ describe('CodexCliProvider', () => {
     expect(run.args).toContain('--skip-git-repo-check');
     expect(arg(run.args, '--cd')).toBe('/repo');
     expect(run.args.at(-1)).toBe('-');
-    expect(run.args).not.toContain('--json');
+    expect(run.args).toContain('--json');
     expect(run.stdin).toBe('SYS\n\nPROMPT');
     expect(schemaContent).toBe('{"type":"object"}');
     expect(existsSync(schemaFile)).toBe(false);
+  });
+
+  it('with --json and --output-last-message: text from the file, usage from events', async () => {
+    const stdout = [
+      '{"type":"item.completed","item":{"type":"agent_message","text":"from stream"}}',
+      '{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":6}}',
+    ].join('\n');
+    const { provider, calls } = setup(FULL_HELP, (call) => ({
+      stdout,
+      onRun: () => writeFile(arg(call.args, '--output-last-message')!, 'from file'),
+    }));
+    const res = await provider.complete({ system: '', prompt: 'p' });
+    expect(res).toEqual({ text: 'from file', usage: { inputTokens: 5, outputTokens: 6 } });
+    expect(calls[1]!.args).toContain('--json');
+    expect(calls[1]!.args).toContain('--output-last-message');
+  });
+
+  it('falls back to the stream message when the last-message file is missing', async () => {
+    const stdout = '{"type":"item.completed","item":{"type":"agent_message","text":"streamed"}}';
+    const { provider } = setup(FULL_HELP, () => ({ stdout }));
+    expect((await provider.complete({ system: '', prompt: 'p' })).text).toBe('streamed');
   });
 
   it('without a cwd runs in an empty temp dir', async () => {

@@ -71,7 +71,8 @@ export class CodexCliProvider implements LlmProvider {
       const lastFile = join(dir, 'last-message.txt');
       const useLastFile = caps.outputLastMessage;
       if (useLastFile) args.push('--output-last-message', lastFile);
-      else if (caps.json) args.push('--json');
+      // Always request the event stream when supported: usage is parsed from it.
+      if (caps.json) args.push('--json');
       args.push('-'); // read the prompt from stdin
 
       // codex exec has no system-prompt flag: fold it into the prompt.
@@ -98,6 +99,7 @@ export class CodexCliProvider implements LlmProvider {
       let text: string | undefined;
       if (useLastFile) {
         text = await readFile(lastFile, 'utf8').catch(() => undefined);
+        if (!text?.trim() && caps.json) text = lastAgentMessage(stdout);
       } else if (caps.json) {
         text = lastAgentMessage(stdout);
       } else {
