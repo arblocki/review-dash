@@ -81,7 +81,8 @@ export class CodexCliProvider implements LlmProvider {
         args,
         input,
         // Without a checkout, run in the empty temp dir so nothing is readable.
-        cwd: req.cwd ? undefined : dir,
+        // Set even when --cd is passed, in case the flag isn't supported.
+        cwd: req.cwd ?? dir,
         timeoutMs: this.opts.timeoutMs,
         signal: req.signal,
         spawnFn: this.opts.spawnFn,

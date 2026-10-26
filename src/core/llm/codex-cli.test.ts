@@ -71,6 +71,15 @@ describe('CodexCliProvider', () => {
     expect(calls[1]!.args).not.toContain('--cd');
   });
 
+  it('sets the process cwd to the checkout when --cd is unsupported', async () => {
+    const { provider, calls } = setup(JSON_ONLY_HELP, () => ({
+      stdout: '{"type":"item.completed","item":{"type":"agent_message","text":"x"}}',
+    }));
+    await provider.complete({ system: '', prompt: 'p', cwd: '/repo' });
+    expect(calls[1]!.cwd).toBe('/repo');
+    expect(calls[1]!.args).not.toContain('--cd');
+  });
+
   it('falls back to the --json event stream and maps usage', async () => {
     const stdout = [
       '{"type":"thread.started"}',
