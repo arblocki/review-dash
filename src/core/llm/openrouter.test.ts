@@ -111,4 +111,53 @@ describe('OpenRouterProvider', () => {
       kind: 'timeout',
     });
   });
+
+  describe('body read errors', () => {
+    /** 200 response whose body stream errors once the request signal aborts. */
+    const slowBody = (init: RequestInit) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          init.signal!.addEventListener('abort', () => controller.error(new Error('body aborted')));
+        },
+      });
+      return Promise.resolve(new Response(body, { status: 200 }));
+    };
+
+    it('reports a user abort during the body read as aborted', async () => {
+      const ac = new AbortController();
+      const p = new OpenRouterProvider({
+        apiKey: 'k',
+        model: 'm',
+        fetch: fakeFetch([slowBody]).impl,
+      });
+      const pending = p.complete({ system: '', prompt: 'p', signal: ac.signal });
+      setTimeout(() => ac.abort(), 10);
+      await expect(pending).rejects.toMatchObject({ kind: 'aborted' });
+    });
+
+    it('reports a timeout during the body read as timeout', async () => {
+      const p = new OpenRouterProvider({
+        apiKey: 'k',
+        model: 'm',
+        timeoutMs: 20,
+        fetch: fakeFetch([slowBody]).impl,
+      });
+      await expect(p.complete({ system: '', prompt: 'p' })).rejects.toMatchObject({
+        kind: 'timeout',
+      });
+    });
+
+    it('reports other body read failures as http with the cause', async () => {
+      const cause = new Error('socket hang up');
+      const bad = {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: () => Promise.reject(cause),
+      } as unknown as Response;
+      const p = new OpenRouterProvider({ apiKey: 'k', model: 'm', fetch: fakeFetch([bad]).impl });
+      const e = await p.complete({ system: '', prompt: 'p' }).catch((x: unknown) => x);
+      expect(e).toMatchObject({ kind: 'http', cause });
+    });
+  });
 });

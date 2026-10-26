@@ -70,16 +70,15 @@ export class OpenRouterProvider implements LlmProvider {
         signal,
       });
     } catch (err) {
-      if (req.signal?.aborted)
-        throw new LlmError('aborted', 'OpenRouter request aborted', { cause: err });
-      if (timeout.aborted)
-        throw new LlmError('timeout', `OpenRouter timed out after ${timeoutMs}ms`, { cause: err });
-      throw new LlmError('http', `OpenRouter request failed: ${(err as Error).message}`, {
-        cause: err,
-      });
+      throw this.classify(err, req.signal, timeout, timeoutMs, 'request failed');
     }
 
-    const raw = await res.text().catch(() => '');
+    let raw: string;
+    try {
+      raw = await res.text();
+    } catch (err) {
+      throw this.classify(err, req.signal, timeout, timeoutMs, 'failed to read response body');
+    }
     let json: unknown;
     try {
       json = raw ? JSON.parse(raw) : undefined;
@@ -93,6 +92,21 @@ export class OpenRouterProvider implements LlmProvider {
       raw.slice(0, 500) ||
       res.statusText;
     return { ok: false as const, status: res.ok ? 502 : res.status, json, errorText };
+  }
+
+  /** Map a fetch()/body-read failure to user abort, timeout, or a generic http error. */
+  private classify(
+    err: unknown,
+    userSignal: AbortSignal | undefined,
+    timeout: AbortSignal,
+    timeoutMs: number,
+    what: string,
+  ): LlmError {
+    if (userSignal?.aborted)
+      return new LlmError('aborted', 'OpenRouter request aborted', { cause: err });
+    if (timeout.aborted)
+      return new LlmError('timeout', `OpenRouter timed out after ${timeoutMs}ms`, { cause: err });
+    return new LlmError('http', `OpenRouter ${what}: ${(err as Error).message}`, { cause: err });
   }
 }
 
