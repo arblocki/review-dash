@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { createProvider, loadConfig } from '../src/core/llm/index.js';
 
 const args = process.argv.slice(2);
