@@ -102,6 +102,11 @@ export function describeAnalysisError(code: string | undefined, message: string)
         title: 'The analysis provider is not signed in',
         hint: 'Log in to the provider (or set its API key), or switch provider.',
       };
+    case 'unsupported':
+      return {
+        title: 'The provider CLI is too old to run read-only',
+        hint: 'Upgrade the CLI so review-dash can restrict its tools, or switch provider.',
+      };
     case 'config':
       return {
         title: 'The analysis provider is misconfigured',

@@ -95,6 +95,7 @@ describe('formatting', () => {
   });
   it('describes provider errors with a hint', () => {
     expect(describeAnalysisError('not_installed', 'x').hint).toMatch(/claude CLI/);
+    expect(describeAnalysisError('unsupported', 'x').hint).toMatch(/Upgrade/);
     expect(describeAnalysisError('auth', 'x').title).toMatch(/signed in/);
     expect(describeAnalysisError('weird', 'x').title).toBe('Analysis failed');
   });
