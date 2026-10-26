@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { api, ApiError } from './api';
+import { api, ApiError, prUrl } from './api';
 import { isStale, needsReanalysis, prVersionKey } from './lib/staleness';
 import { useReview } from './state';
 import type { AnalysisResponse, ProvidersResponse } from './types';
@@ -64,7 +64,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
   const choiceRef = useRef<ProviderChoice | null>(null);
 
   useEffect(() => {
-    api<ProvidersResponse>('/api/providers').then(setProviders, () => undefined);
+    api<ProvidersResponse>(prUrl('/providers')).then(setProviders, () => undefined);
   }, []);
 
   useEffect(() => {
@@ -83,7 +83,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
       if (choice.model) params.set('model', choice.model);
     }
     const qs = params.toString();
-    api<AnalysisResponse>(`/api/analysis${qs ? `?${qs}` : ''}`, { signal: ctl.signal })
+    api<AnalysisResponse>(prUrl(`/analysis${qs ? `?${qs}` : ''}`), { signal: ctl.signal })
       .then((res) => {
         setResult(res);
         setLoading(false);

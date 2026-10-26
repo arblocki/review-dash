@@ -7,6 +7,7 @@ import type {
   GraphqlLike,
   PrCommit,
   PrMeta,
+  PrSummary,
   RestLike,
   ReviewThread,
   ThreadComment,
@@ -18,6 +19,7 @@ const MAX_FILES = 3000;
 export const MAX_COMPARE_COMMITS = 1000;
 /** The compare endpoint returns at most this many files and does not paginate them. */
 export const COMPARE_FILE_LIMIT = 300;
+const MAX_OPEN_PRS = 500;
 const DIFF_ACCEPT = 'application/vnd.github.diff';
 
 // Loosely typed API payloads; every field is read defensively.
@@ -98,6 +100,29 @@ export function createGitHubClient(deps: { rest: RestLike; gql: GraphqlLike }): 
   }
 
   return {
+    async listOpenPrs(repo) {
+      const raw = await paginate(
+        'GET /repos/{owner}/{repo}/pulls',
+        { owner: repo.owner, repo: repo.repo, state: 'open', sort: 'updated', direction: 'desc' },
+        MAX_OPEN_PRS,
+      );
+      return raw.map((p): PrSummary => ({
+        number: p.number,
+        title: p.title ?? '',
+        author: p.user?.login ?? 'ghost',
+        draft: !!p.draft,
+        url: p.html_url ?? '',
+        headRef: p.head?.ref ?? '',
+        baseRef: p.base?.ref ?? '',
+        createdAt: p.created_at ?? '',
+        updatedAt: p.updated_at ?? '',
+        labels: ((p.labels ?? []) as Json[]).map((l) => String(l.name ?? '')).filter(Boolean),
+        requestedReviewers: ((p.requested_reviewers ?? []) as Json[])
+          .map((u) => String(u.login ?? ''))
+          .filter(Boolean),
+      }));
+    },
+
     async fetchPr(ref) {
       const { data } = await rest.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
         owner: ref.owner,

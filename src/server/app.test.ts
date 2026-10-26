@@ -10,8 +10,9 @@ import { TOKEN_HEADER } from './security.js';
 const TOKEN = 'test-token';
 const PORT = 4321;
 const pr = { owner: 'octocat', repo: 'hello-world', number: 1 };
+const appTarget = { repo: { owner: pr.owner, repo: pr.repo }, initialPr: pr.number };
 const deps = { github: fakeGitHub(), store: openStore(':memory:') };
-const app = createApp({ token: TOKEN, pr, port: () => PORT, ...deps });
+const app = createApp({ token: TOKEN, ...appTarget, port: () => PORT, ...deps });
 
 function get(path: string, headers: Record<string, string> = {}) {
   return app.request(path, {
@@ -69,9 +70,81 @@ describe('origin check', () => {
 });
 
 describe('/api/session', () => {
-  it('returns the PR being reviewed', async () => {
+  it('returns the repository and the PR to open first', async () => {
     const res = await get('/api/session');
-    expect(await res.json()).toEqual({ pr, label: 'octocat/hello-world#1' });
+    expect(await res.json()).toEqual({
+      repo: appTarget.repo,
+      pr,
+      label: 'octocat/hello-world#1',
+    });
+  });
+
+  it('has no PR when started with only a repository', async () => {
+    const a = createApp({ token: TOKEN, repo: appTarget.repo, port: () => PORT, ...deps });
+    const res = await a.request('/api/session', {
+      headers: { host: `127.0.0.1:${PORT}`, [TOKEN_HEADER]: TOKEN },
+    });
+    expect(await res.json()).toEqual({
+      repo: appTarget.repo,
+      pr: null,
+      label: 'octocat/hello-world',
+    });
+  });
+});
+
+describe('/api/pulls', () => {
+  it('lists open pull requests', async () => {
+    const summary = {
+      number: 7,
+      title: 'Add retries',
+      author: 'hubot',
+      draft: false,
+      url: 'https://github.com/octocat/hello-world/pull/7',
+      headRef: 'retries',
+      baseRef: 'main',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-02T00:00:00Z',
+      labels: [],
+      requestedReviewers: [],
+    };
+    deps.github.openPrs = [summary];
+    const res = await get('/api/pulls');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ pulls: [summary] });
+  });
+
+  it('returns 502 with the upstream status when GitHub fails', async () => {
+    const github = fakeGitHub();
+    github.listOpenPrs = async () => {
+      throw Object.assign(new Error('Not Found'), { status: 404 });
+    };
+    const a = createApp({
+      token: TOKEN,
+      ...appTarget,
+      port: () => PORT,
+      github,
+      store: deps.store,
+    });
+    const res = await a.request('/api/pulls', {
+      headers: { host: `127.0.0.1:${PORT}`, [TOKEN_HEADER]: TOKEN },
+    });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: 'Not Found', upstreamStatus: 404 });
+  });
+
+  it.each(['0', 'abc', '1e3', '-1', '99999999999999999999'])('rejects PR number %j', async (n) => {
+    expect((await get(`/api/pulls/${n}/pr`)).status).toBe(400);
+  });
+
+  it('returns 404 JSON for unknown PR routes', async () => {
+    const res = await get('/api/pulls/1/nope');
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not found' });
+  });
+
+  it('requires the token on PR routes', async () => {
+    const res = await app.request('/api/pulls/1/pr', { headers: { host: `127.0.0.1:${PORT}` } });
+    expect(res.status).toBe(401);
   });
 });
 
@@ -83,7 +156,7 @@ describe('static UI serving', () => {
     const root = mkdtempSync(join(tmpdir(), 'rd-web-'));
     const webDir = join(root, 'web');
     try {
-      const a = createApp({ token: TOKEN, pr, port: () => PORT, webDir, ...deps });
+      const a = createApp({ token: TOKEN, ...appTarget, port: () => PORT, webDir, ...deps });
       expect((await a.request('/', { headers: host })).status).toBe(503);
       expect(
         (await a.request('/api/health', { headers: { ...host, [TOKEN_HEADER]: TOKEN } })).status,
@@ -105,7 +178,7 @@ describe('static UI serving', () => {
     const webDir = mkdtempSync(join(tmpdir(), 'rd-web-'));
     try {
       writeFileSync(join(webDir, 'index.html'), html('old.js'));
-      const a = createApp({ token: TOKEN, pr, port: () => PORT, webDir, ...deps });
+      const a = createApp({ token: TOKEN, ...appTarget, port: () => PORT, webDir, ...deps });
       expect(await (await a.request('/', { headers: host })).text()).toContain('old.js');
 
       writeFileSync(join(webDir, 'index.html'), html('new.js'));

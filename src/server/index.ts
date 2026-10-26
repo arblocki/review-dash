@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
 import { serve } from '@hono/node-server';
-import type { PrRef } from '../core/pr-ref.js';
+import type { RepoRef } from '../core/pr-ref.js';
 import type { GitHubClient } from '../core/github/types.js';
 import type { Store } from '../core/store/index.js';
 import type { AnalysisDeps } from './analysis.js';
@@ -20,7 +20,8 @@ const WEB_DIR = resolve(fileURLToPath(import.meta.url), '../../../dist/web');
 
 /** Starts the server on 127.0.0.1. Port 0 picks a random free port. */
 export function startServer(opts: {
-  pr: PrRef;
+  repo: RepoRef;
+  initialPr?: number;
   port?: number;
   github: GitHubClient;
   store: Store;
@@ -30,7 +31,8 @@ export function startServer(opts: {
   let port = opts.port ?? 0;
   const app = createApp({
     token,
-    pr: opts.pr,
+    repo: opts.repo,
+    initialPr: opts.initialPr,
     github: opts.github,
     store: opts.store,
     analysis: opts.analysis,

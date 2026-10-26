@@ -58,6 +58,65 @@ describe('github client', () => {
     expect(diffCalls).toHaveLength(1);
   });
 
+  it('lists open pull requests, newest update first', async () => {
+    const calls: { route: string; params?: Record<string, unknown> }[] = [];
+    const rest: RestLike = {
+      async request(route, params) {
+        calls.push({ route, params });
+        return {
+          data: [
+            {
+              number: 7,
+              title: 'Add retries',
+              user: { login: 'hubot' },
+              draft: true,
+              html_url: 'https://github.com/o/r/pull/7',
+              head: { ref: 'retries' },
+              base: { ref: 'main' },
+              created_at: '2026-01-01T00:00:00Z',
+              updated_at: '2026-01-02T00:00:00Z',
+              labels: [{ name: 'backend' }, {}],
+              requested_reviewers: [{ login: 'octocat' }],
+            },
+            { number: 8, user: null, head: {}, base: {} },
+          ],
+        };
+      },
+    };
+    const prs = await createGitHubClient({ rest, gql: noGql }).listOpenPrs({
+      owner: 'o',
+      repo: 'r',
+    });
+    expect(calls).toEqual([
+      {
+        route: 'GET /repos/{owner}/{repo}/pulls',
+        params: {
+          owner: 'o',
+          repo: 'r',
+          state: 'open',
+          sort: 'updated',
+          direction: 'desc',
+          per_page: 100,
+          page: 1,
+        },
+      },
+    ]);
+    expect(prs[0]).toEqual({
+      number: 7,
+      title: 'Add retries',
+      author: 'hubot',
+      draft: true,
+      url: 'https://github.com/o/r/pull/7',
+      headRef: 'retries',
+      baseRef: 'main',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-02T00:00:00Z',
+      labels: ['backend'],
+      requestedReviewers: ['octocat'],
+    });
+    expect(prs[1]).toMatchObject({ number: 8, title: '', author: 'ghost', draft: false });
+  });
+
   it('paginates files', async () => {
     let pages = 0;
     const rest: RestLike = {

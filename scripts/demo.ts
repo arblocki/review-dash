@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFile } from '../src/core/diff/parse.js';
 import type { RawFile } from '../src/core/diff/types.js';
-import type { ReviewThread } from '../src/core/github/types.js';
+import type { PrSummary, ReviewThread } from '../src/core/github/types.js';
 import { configSchema } from '../src/core/llm/config.js';
 import { FakeProvider } from '../src/core/llm/fake.js';
 import { openStore } from '../src/core/store/index.js';
@@ -155,7 +155,8 @@ function demoGrouping(prompt: string): string {
 }
 
 export async function startDemo(
-  opts: { port?: number; self?: boolean; rereview?: boolean } = {},
+  /** `picker` starts on the open-PR list instead of PR #1. */
+  opts: { port?: number; self?: boolean; rereview?: boolean; picker?: boolean } = {},
 ): Promise<Demo> {
   const fx = loadFixture();
   const contents: Record<string, [string, string]> = {
@@ -219,6 +220,38 @@ export async function startDemo(
   ];
 
   const prRef = { owner: 'octocat', repo: 'hello-world', number: 1 };
+  // Every listed PR serves the same fixture diff.
+  const summary = (
+    number: number,
+    title: string,
+    author: string,
+    hoursAgo: number,
+    extra: Partial<PrSummary> = {},
+  ): PrSummary => ({
+    number,
+    title,
+    author,
+    draft: false,
+    url: `https://github.com/octocat/hello-world/pull/${number}`,
+    headRef: `feature-${number}`,
+    baseRef: 'main',
+    createdAt: '2026-01-01T10:00:00Z',
+    updatedAt: new Date(Date.now() - hoursAgo * 3_600_000).toISOString(),
+    labels: [],
+    requestedReviewers: [],
+    ...extra,
+  });
+  github.openPrs = [
+    summary(1, fx.pr.title, fx.pr.author, 1, {
+      labels: ['enhancement'],
+      requestedReviewers: ['octocat'],
+    }),
+    summary(7, 'Retry webhook deliveries with backoff', 'hubot', 26),
+    summary(12, 'WIP: migrate config loader to zod', 'monalisa', 200, {
+      draft: true,
+      labels: ['wip'],
+    }),
+  ];
   const store = openStore(':memory:');
   if (opts.rereview) {
     // The user reviewed the Python and test hunks at an older head; two commits landed since.
@@ -248,7 +281,8 @@ export async function startDemo(
   }
 
   const server = await startServer({
-    pr: prRef,
+    repo: { owner: prRef.owner, repo: prRef.repo },
+    initialPr: opts.picker ? undefined : prRef.number,
     port: opts.port ?? 0,
     github,
     store,
@@ -283,6 +317,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     port: portIdx >= 0 ? Number(process.argv[portIdx + 1]) : 5175,
     self: process.argv.includes('--self'),
     rereview: process.env.DEMO_REREVIEW === '1',
+    picker: process.argv.includes('--picker'),
   });
   console.log(`Demo (fake GitHub): ${demo.url}`);
   // Smoke tests: `kill -USR2 <pid>` simulates a push; click Refresh in the UI to pick it up.

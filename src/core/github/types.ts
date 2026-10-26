@@ -1,4 +1,4 @@
-import type { PrRef } from '../pr-ref.js';
+import type { PrRef, RepoRef } from '../pr-ref.js';
 import type { RawFile, Side } from '../diff/types.js';
 
 export interface PrMeta {
@@ -14,6 +14,22 @@ export interface PrMeta {
   additions: number;
   deletions: number;
   changedFiles: number;
+}
+
+/** One row of a repository's open pull request list. */
+export interface PrSummary {
+  number: number;
+  title: string;
+  author: string;
+  draft: boolean;
+  url: string;
+  headRef: string;
+  baseRef: string;
+  createdAt: string;
+  updatedAt: string;
+  labels: string[];
+  /** Logins of users whose review is requested. */
+  requestedReviewers: string[];
 }
 
 export interface ThreadComment {
@@ -81,6 +97,8 @@ export interface SubmittedReview {
 
 /** Everything the app needs from GitHub. Implemented by the Octokit client; faked in tests. */
 export interface GitHubClient {
+  /** Open pull requests, most recently updated first (capped). */
+  listOpenPrs(repo: RepoRef): Promise<PrSummary[]>;
   fetchPr(ref: PrRef): Promise<PrMeta>;
   /** Changed files, with `patch` filled in via the full-diff fallback where GitHub omitted it. */
   fetchFiles(ref: PrRef): Promise<RawFile[]>;

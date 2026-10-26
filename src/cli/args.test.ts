@@ -4,7 +4,8 @@ import { parseCli, UsageError } from './args.js';
 describe('parseCli', () => {
   it('parses a PR ref with defaults', () => {
     expect(parseCli(['octocat/hello-world#1'])).toEqual({
-      pr: { owner: 'octocat', repo: 'hello-world', number: 1 },
+      repo: { owner: 'octocat', repo: 'hello-world' },
+      pr: 1,
       provider: undefined,
       model: undefined,
       port: undefined,
@@ -27,7 +28,8 @@ describe('parseCli', () => {
       '--debug',
     ]);
     expect(opts).toMatchObject({
-      pr: { owner: 'o', repo: 'r', number: 2 },
+      repo: { owner: 'o', repo: 'r' },
+      pr: 2,
       provider: 'openrouter',
       model: 'm',
       port: 8080,
@@ -36,6 +38,15 @@ describe('parseCli', () => {
     });
   });
 
+  it.each(['octocat/hello-world', 'https://github.com/octocat/hello-world'])(
+    'parses a repository %j without a PR',
+    (arg) => {
+      const opts = parseCli([arg]);
+      expect(opts).toMatchObject({ repo: { owner: 'octocat', repo: 'hello-world' } });
+      expect(opts).not.toHaveProperty('pr');
+    },
+  );
+
   it('returns help', () => {
     expect(parseCli(['--help'])).toBe('help');
   });
@@ -43,6 +54,7 @@ describe('parseCli', () => {
   it.each([
     [[]],
     [['nope']],
+    [['a/b', 'c/d']],
     [['a/b#1', '--port', 'x']],
     [['a/b#1', '--bogus']],
     [['a/b#1', '--provider', 'gpt']],

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatPrRef, parsePrRef } from './pr-ref.js';
+import { formatPrRef, formatRepoRef, parsePrRef, parseRepoRef } from './pr-ref.js';
 
 const expected = { owner: 'octocat', repo: 'hello-world', number: 123 };
 
@@ -46,5 +46,39 @@ describe('parsePrRef', () => {
 describe('formatPrRef', () => {
   it('round-trips', () => {
     expect(formatPrRef(expected)).toBe('octocat/hello-world#123');
+  });
+});
+
+describe('parseRepoRef', () => {
+  const repo = { owner: 'octocat', repo: 'hello-world' };
+
+  it.each([
+    'octocat/hello-world',
+    '  octocat/hello-world\n',
+    'https://github.com/octocat/hello-world',
+    'https://github.com/octocat/hello-world/',
+    'https://github.com/octocat/hello-world/pulls',
+    'https://github.com/octocat/hello-world.git',
+    'https://github.com/octocat/hello-world?tab=readme',
+  ])('parses %j', (input) => {
+    expect(parseRepoRef(input)).toEqual(repo);
+  });
+
+  it.each([
+    '',
+    'octocat',
+    'octocat/hello-world#1',
+    'a/b/c',
+    'octocat/..',
+    'http://github.com/octocat/hello-world',
+    'https://example.com/octocat/hello-world',
+    'https://github.com/octocat/hello-world/pull/1',
+    'https://github.com/octocat/hello-world/issues',
+  ])('rejects %j', (input) => {
+    expect(parseRepoRef(input)).toBeNull();
+  });
+
+  it('formats', () => {
+    expect(formatRepoRef(repo)).toBe('octocat/hello-world');
   });
 });

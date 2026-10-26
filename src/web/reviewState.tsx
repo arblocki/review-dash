@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useAnalysis } from './analysis';
-import { api, jsonBody } from './api';
+import { api, jsonBody, prUrl } from './api';
 import { verifyIdsFromWire, verifyWireArgs } from './lib/groups';
 import { filterSections } from './lib/reviewFilter';
 import { fileKeyMap } from './lib/reviewItems';
@@ -135,7 +135,7 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
   autoRef.current = auto;
 
   useEffect(() => {
-    api<ReviewStateResponse>('/api/review-state').then(
+    api<ReviewStateResponse>(prUrl('/review-state')).then(
       (s) => {
         // Local edits made before this arrived win.
         sync.applySnapshot(s.reviewedHunkIds);
@@ -147,7 +147,7 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
 
   const reloadInterdiff = useCallback(async () => {
     try {
-      setInterdiff(await api<InterdiffResponse>('/api/interdiff'));
+      setInterdiff(await api<InterdiffResponse>(prUrl('/interdiff')));
     } catch {
       // the banner is optional; the diff still works without it
     }
@@ -159,7 +159,7 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
 
   const checkHead = useCallback(async () => {
     try {
-      const i = await api<InterdiffResponse>('/api/interdiff?refresh=1');
+      const i = await api<InterdiffResponse>(prUrl('/interdiff?refresh=1'));
       setInterdiff(i);
       return i.currentHeadSha;
     } catch {
@@ -170,7 +170,7 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
   const setHunks = useCallback(
     (ids: string[], value: boolean) => {
       sync.setItems(ids, value, () =>
-        api('/api/reviewed', {
+        api(prUrl('/reviewed'), {
           method: 'PUT',
           ...jsonBody({ hunkIds: ids, reviewed: value, headSha: pr.headSha, diffHash }),
         }),
@@ -212,7 +212,7 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
         else next.delete(id);
         return next;
       });
-      api('/api/verify', {
+      api(prUrl('/verify'), {
         method: 'PUT',
         ...jsonBody({ ...wire, checked }),
       }).catch((err: unknown) => {
@@ -230,7 +230,7 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
 
   const markDoneReviewing = useCallback(async () => {
     try {
-      await api('/api/review-checkpoint', {
+      await api(prUrl('/review-checkpoint'), {
         method: 'POST',
         ...jsonBody({ headSha: pr.headSha, diffHash }),
       });

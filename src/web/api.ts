@@ -49,6 +49,19 @@ export class ApiError extends Error {
   }
 }
 
+/** PR the page is reviewing. Fixed for the page's lifetime: switching PRs reloads the page. */
+let prNumber: number | undefined;
+
+export function selectPr(number: number): void {
+  prNumber = number;
+}
+
+/** URL of a route in the selected PR's API, e.g. `prUrl('/drafts')`. */
+export function prUrl(path: string): string {
+  if (prNumber === undefined) throw new Error('No pull request selected');
+  return `/api/pulls/${prNumber}${path}`;
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set(TOKEN_HEADER, token);

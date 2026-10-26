@@ -20,7 +20,14 @@ pnpm build
 ```sh
 pnpm start owner/repo#123
 pnpm start https://github.com/owner/repo/pull/123 --port 8080 --no-open
+pnpm start owner/repo          # or https://github.com/owner/repo
 ```
+
+Given just a repository, the UI opens on its open pull requests (most recently updated first,
+up to 500). Filter by number, title, author, branch or label, then click one or use ↑/↓ and
+Enter. `← PRs` in the review header goes back to the list (pending drafts are saved first).
+The address bar tracks the choice: `?pr=123` opens a PR, `?pulls` the list. Started with a PR,
+the UI opens that PR and the list is still one click away.
 
 By default the browser is opened for you. With `--no-open` the full URL is printed. It
 contains a session token (`#token=...`), so don't share or log it. When the browser is
@@ -46,7 +53,7 @@ Per-repo risk rules go in `.review-dash.yaml` at the repo root (see
 header switcher, or the config file (see `docs/PLAN.md` section 5.4).
 
 To try the UI without a token, run `pnpm build && pnpm demo` (add `DEMO_REREVIEW=1` for the
-re-review banner).
+re-review banner, or `--picker` to start on the open-PR list).
 
 ## Authentication
 
