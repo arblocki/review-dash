@@ -12,7 +12,9 @@ import { useAnalysis } from './analysis';
 import { api, jsonBody } from './api';
 import { verifyIdsFromWire, verifyWireArgs } from './lib/groups';
 import { filterSections } from './lib/reviewFilter';
-import { allItemIds, fileKeyMap } from './lib/reviewItems';
+import { fileKeyMap } from './lib/reviewItems';
+import { reviewItemIds } from '../core/review-items';
+import { describeReviewedError } from './lib/reviewedError';
 import type { DiffSection } from './lib/sections';
 import { autoClearIds, hunkStatus, type HunkStatus } from './lib/progress';
 import { effectiveHideReviewed, reReviewInfo, type ReReview } from './lib/rereview';
@@ -44,6 +46,8 @@ export interface ReviewStateValue {
   /** Re-fetches interdiff; `reset` also drops the sticky banner (after submitting a review). */
   reloadInterdiff(reset?: boolean): Promise<void>;
   error: string | null;
+  /** The error is a stale-head conflict: refreshing the PR is the fix. */
+  errorNeedsRefresh: boolean;
   dismissError(): void;
 }
 
@@ -79,7 +83,7 @@ function saveSet(key: string, set: ReadonlySet<string>): void {
 }
 
 export function ReviewStateProvider({ children }: { children: ReactNode }) {
-  const { session, files, pr } = useReview();
+  const { session, files, pr, diffHash } = useReview();
   const { result, stale } = useAnalysis();
   const [reviewed, setReviewedState] = useState<ReadonlySet<string>>(new Set());
   const [verifyChecked, setVerifyChecked] = useState<ReadonlySet<string>>(new Set());
@@ -88,7 +92,14 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
   // would end the re-review mid-session. The banner (and its default) stays until reload.
   const [latched, setLatched] = useState<InterdiffResponse | null>(null);
   const [hideChoice, setHideChoice] = useState<boolean | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [errorState, setErrorState] = useState<{ message: string; needsRefresh: boolean } | null>(
+    null,
+  );
+  const error = errorState?.message ?? null;
+  const setError = useCallback(
+    (message: string | null) => setErrorState(message ? { message, needsRefresh: false } : null),
+    [],
+  );
   const [focusedId, setFocusedId] = useState<string | null>(null);
 
   // Auto-clear is never stored, so un-checking an auto-cleared hunk is a local override.
@@ -105,7 +116,10 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
   uncheckedRef.current = autoUnchecked;
 
   const fileKeys = useMemo(() => fileKeyMap(files, pr.headSha), [files, pr.headSha]);
-  const knownItemIds = useMemo(() => allItemIds(files, pr.headSha), [files, pr.headSha]);
+  const knownItemIds = useMemo(
+    () => new Set(reviewItemIds(files, pr.headSha)),
+    [files, pr.headSha],
+  );
   const auto = useMemo(
     // A stale analysis describes an older diff: it must not auto-clear hunks of this one.
     () => (result && !stale ? autoClearIds(result.analysis.groups, fileKeys) : new Set<string>()),
@@ -123,7 +137,7 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
       },
       (err: unknown) => setError(`Could not load reviewed state: ${(err as Error).message}`),
     );
-  }, []);
+  }, [setError]);
 
   const reloadInterdiff = useCallback(async (reset?: boolean) => {
     if (reset) setLatched(null);
@@ -165,22 +179,23 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
       }
       setAutoUnchecked(o);
       saveSet(overrideKey, o);
-      api('/api/reviewed', { method: 'PUT', ...jsonBody({ hunkIds: ids, reviewed: value }) }).catch(
-        (err: unknown) => {
-          // Roll back just these ids.
-          setReviewedState((cur) => {
-            const rolled = new Set(cur);
-            for (const id of ids) {
-              if (prev.has(id)) rolled.add(id);
-              else rolled.delete(id);
-            }
-            return rolled;
-          });
-          setError(`Could not save reviewed state: ${(err as Error).message}`);
-        },
-      );
+      api('/api/reviewed', {
+        method: 'PUT',
+        ...jsonBody({ hunkIds: ids, reviewed: value, headSha: pr.headSha, diffHash }),
+      }).catch((err: unknown) => {
+        // Roll back just these ids.
+        setReviewedState((cur) => {
+          const rolled = new Set(cur);
+          for (const id of ids) {
+            if (prev.has(id)) rolled.add(id);
+            else rolled.delete(id);
+          }
+          return rolled;
+        });
+        setErrorState(describeReviewedError(err));
+      });
     },
-    [overrideKey],
+    [overrideKey, pr.headSha, diffHash],
   );
 
   const status = useCallback(
@@ -196,30 +211,33 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
     [setHunks],
   );
 
-  const toggleVerify = useCallback((id: string) => {
-    const wire = verifyWireArgs(id);
-    if (!wire) return;
-    const prev = verifyRef.current;
-    const checked = !prev.has(id);
-    setVerifyChecked((cur) => {
-      const next = new Set(cur);
-      if (checked) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-    api('/api/verify', {
-      method: 'PUT',
-      ...jsonBody({ ...wire, checked }),
-    }).catch((err: unknown) => {
+  const toggleVerify = useCallback(
+    (id: string) => {
+      const wire = verifyWireArgs(id);
+      if (!wire) return;
+      const prev = verifyRef.current;
+      const checked = !prev.has(id);
       setVerifyChecked((cur) => {
         const next = new Set(cur);
-        if (checked) next.delete(id);
-        else next.add(id);
+        if (checked) next.add(id);
+        else next.delete(id);
         return next;
       });
-      setError(`Could not save checklist: ${(err as Error).message}`);
-    });
-  }, []);
+      api('/api/verify', {
+        method: 'PUT',
+        ...jsonBody({ ...wire, checked }),
+      }).catch((err: unknown) => {
+        setVerifyChecked((cur) => {
+          const next = new Set(cur);
+          if (checked) next.delete(id);
+          else next.add(id);
+          return next;
+        });
+        setError(`Could not save checklist: ${(err as Error).message}`);
+      });
+    },
+    [setError],
+  );
 
   useEffect(() => {
     if (interdiff && reReviewInfo(interdiff)) setLatched(interdiff);
@@ -227,7 +245,7 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
   const banner = latched ?? interdiff;
   const reReview = useMemo(() => reReviewInfo(banner), [banner]);
   const hideReviewed = effectiveHideReviewed(hideChoice, reReview);
-  const dismissError = useCallback(() => setError(null), []);
+  const dismissError = useCallback(() => setErrorState(null), []);
 
   const value = useMemo<ReviewStateValue>(
     () => ({
@@ -247,6 +265,7 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
       checkHead,
       reloadInterdiff,
       error,
+      errorNeedsRefresh: errorState?.needsRefresh ?? false,
       dismissError,
     }),
     [
@@ -265,6 +284,7 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
       checkHead,
       reloadInterdiff,
       error,
+      errorState,
       dismissError,
     ],
   );

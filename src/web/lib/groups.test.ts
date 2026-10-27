@@ -218,10 +218,10 @@ describe('parseVerifyId', () => {
 describe('persisted verify checks', () => {
   /** What the server would hand back after the user checked these ids. */
   const roundTrip = (ids: string[]): Set<string> => {
-    const stored: Record<string, number[]> = {};
+    const stored: Record<string, { index: number; itemHash: string }[]> = {};
     for (const id of ids) {
       const w = verifyWireArgs(id)!;
-      (stored[w.groupKey] ??= []).push(w.itemIndex);
+      (stored[w.groupKey] ??= []).push({ index: w.itemIndex, itemHash: w.itemHash });
     }
     return new Set(verifyIdsFromWire(stored));
   };
@@ -238,18 +238,25 @@ describe('persisted verify checks', () => {
     expect(checked.has(verifyId('g', 1, 'new text'))).toBe(false);
   });
 
-  it('puts the text hash in the stored group key and leaves the index alone', () => {
-    expect(verifyWireArgs(verifyId('g', 4, 'x'))).toEqual({
-      groupKey: `g#${hash8('x')}`,
+  it('sends the group key, index and text hash separately', () => {
+    expect(verifyWireArgs(verifyId('a:b', 4, 'x'))).toEqual({
+      groupKey: 'a:b',
       itemIndex: 4,
+      itemHash: hash8('x'),
     });
     expect(verifyWireArgs('garbage')).toBeNull();
   });
 
-  it('ignores legacy entries stored without a text hash', () => {
-    expect(verifyIdsFromWire({ g: [0, 1], [`h#${hash8('x')}`]: [3] })).toEqual([
-      `h:3:${hash8('x')}`,
-    ]);
+  it('maps the review-state wire shape back to verify ids', () => {
+    expect(
+      verifyIdsFromWire({
+        g: [{ index: 0, itemHash: hash8('a') }],
+        h: [
+          { index: 3, itemHash: hash8('x') },
+          { index: 4, itemHash: hash8('y') },
+        ],
+      }),
+    ).toEqual([`g:0:${hash8('a')}`, `h:3:${hash8('x')}`, `h:4:${hash8('y')}`]);
   });
 });
 

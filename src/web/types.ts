@@ -78,6 +78,8 @@ export interface AnalysisResponse {
   diffHash?: string;
   /** Problem with .review-dash.yaml (it was ignored). */
   configWarning?: string;
+  /** The PR changes .review-dash.yaml: the base branch's rules were used instead. */
+  configNotice?: string;
 }
 
 /** GET /api/providers */
@@ -91,7 +93,7 @@ export interface ProvidersResponse {
 export interface ReviewStateResponse {
   reviewedHunkIds: string[];
   reviewedAt: Record<string, { reviewedAt: string; headSha: string }>;
-  verifyChecks: Record<string, number[]>;
+  verifyChecks: Record<string, { index: number; itemHash: string }[]>;
   lastReviewedHeadSha?: string;
 }
 
@@ -103,4 +105,7 @@ export interface InterdiffResponse {
   changedFiles: string[];
   newHunkIds: string[];
   compareAvailable: boolean;
+  totalCommits: number;
+  commitsTruncated: boolean;
+  filesTruncated: boolean;
 }

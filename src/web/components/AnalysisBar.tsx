@@ -118,6 +118,15 @@ export function AnalysisBar({
           </div>
         )}
       </div>
+      {result?.configNotice && (
+        <p
+          className="mt-1 rounded bg-blue-50 px-2 py-1 text-sm text-blue-950 dark:bg-blue-950/50 dark:text-blue-100"
+          role="status"
+          data-testid="config-notice"
+        >
+          {result.configNotice}
+        </p>
+      )}
       {result?.configWarning && result.configWarning !== dismissedWarning && (
         <div
           className="mt-1 flex items-start gap-2 rounded bg-amber-50 px-2 py-1 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200"

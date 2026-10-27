@@ -30,8 +30,14 @@ import { fileThreadOwners } from './lib/sections';
 import { ReviewProvider, useReview } from './state';
 
 function Review() {
-  const { files, threadsError, hideWhitespace } = useReview();
-  const { verifyChecked, toggleVerify, error: stateError, dismissError } = useReviewState();
+  const { files, threadsError, hideWhitespace, refreshing, refresh } = useReview();
+  const {
+    verifyChecked,
+    toggleVerify,
+    error: stateError,
+    errorNeedsRefresh,
+    dismissError,
+  } = useReviewState();
   const { result, loading, error, stale } = useAnalysis();
   const [submitting, setSubmitting] = useState(false);
   const [choice, setChoice] = useState<ViewMode | null>(null);
@@ -182,6 +188,19 @@ function Review() {
                 role="alert"
               >
                 <span className="min-w-0 flex-1">{stateError}</span>
+                {errorNeedsRefresh && (
+                  <button
+                    type="button"
+                    className="shrink-0 text-xs font-medium hover:underline"
+                    disabled={refreshing}
+                    onClick={() => {
+                      dismissError();
+                      void refresh();
+                    }}
+                  >
+                    {refreshing ? 'Refreshing…' : 'Refresh'}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="shrink-0 text-xs hover:underline"

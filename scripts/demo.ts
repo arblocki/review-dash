@@ -243,6 +243,7 @@ export async function startDemo(
         },
       ],
       files: ['src/greet.ts', 'README.md'],
+      totalCommits: 2,
     };
   }
 

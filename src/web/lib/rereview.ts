@@ -21,3 +21,17 @@ export function reReviewText(r: ReReview): string {
 export function effectiveHideReviewed(choice: boolean | null, banner: ReReview | null): boolean {
   return choice ?? banner !== null;
 }
+
+/** Notes on a truncated GitHub compare/file list (empty when everything was returned). */
+export function interdiffTruncationNotes(
+  i: Pick<InterdiffResponse, 'newCommits' | 'totalCommits' | 'commitsTruncated' | 'filesTruncated'>,
+): string[] {
+  const notes: string[] = [];
+  if (i.commitsTruncated) {
+    notes.push(`showing ${i.newCommits.length} of ${i.totalCommits} commits`);
+  }
+  if (i.filesTruncated) {
+    notes.push('GitHub lists at most 300 changed files — the list may be incomplete');
+  }
+  return notes;
+}

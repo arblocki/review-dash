@@ -124,28 +124,24 @@ export function parseVerifyId(
   return m ? { groupKey: m[1]!, index: Number(m[2]), hash: m[3]! } : null;
 }
 
-/**
- * What `PUT /api/verify` stores for a verify id: the text hash rides along in the group key
- * (`${groupKey}#${hash}`) so the backend stays unchanged, and a checkmark saved for one text is
- * never read back for a different text at the same index.
- */
-export function verifyWireArgs(id: string): { groupKey: string; itemIndex: number } | null {
+/** Body fields of `PUT /api/verify` for a verify id (the caller adds `checked`). */
+export function verifyWireArgs(
+  id: string,
+): { groupKey: string; itemIndex: number; itemHash: string } | null {
   const p = parseVerifyId(id);
-  return p ? { groupKey: `${p.groupKey}#${p.hash}`, itemIndex: p.index } : null;
+  return p ? { groupKey: p.groupKey, itemIndex: p.index, itemHash: p.hash } : null;
 }
 
 /**
- * Verify ids for the `verifyChecks` map of GET /api/review-state. Entries stored without a text
- * hash (before text-keyed ids) cannot be tied to a text, so they are dropped.
+ * Verify ids for the `verifyChecks` map of GET /api/review-state. An id carries the item's text
+ * hash, so a check only matches the current item when index AND hash agree.
  */
-export function verifyIdsFromWire(checks: Record<string, number[]>): string[] {
-  const out: string[] = [];
-  for (const [key, indexes] of Object.entries(checks)) {
-    const m = /^(.+)#([0-9a-f]{8})$/.exec(key);
-    if (!m) continue;
-    for (const i of indexes) out.push(`${m[1]}:${i}:${m[2]}`);
-  }
-  return out;
+export function verifyIdsFromWire(
+  checks: Record<string, { index: number; itemHash: string }[]>,
+): string[] {
+  return Object.entries(checks).flatMap(([groupKey, items]) =>
+    items.map((c) => `${groupKey}:${c.index}:${c.itemHash}`),
+  );
 }
 
 /** Number of hunks that actually exist in the PR (stale ids are ignored). */

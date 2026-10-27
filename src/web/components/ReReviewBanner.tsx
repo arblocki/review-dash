@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { reReviewText } from '../lib/rereview';
+import { interdiffTruncationNotes, reReviewText } from '../lib/rereview';
 import { useReviewState } from '../reviewState';
 
 export function HideReviewedToggle() {
@@ -21,6 +21,7 @@ export function ReReviewBanner() {
   const { reReview, interdiff } = useReviewState();
   const [open, setOpen] = useState(false);
   if (!reReview || !interdiff) return null;
+  const notes = interdiffTruncationNotes(interdiff);
   const detail = reReview.kind === 'commits' && interdiff.newCommits.length > 0;
   return (
     <div
@@ -46,6 +47,11 @@ export function ReReviewBanner() {
           <HideReviewedToggle />
         </span>
       </div>
+      {notes.map((n) => (
+        <p key={n} className="mt-1 text-xs" data-testid="interdiff-truncated">
+          {n}
+        </p>
+      ))}
       {open && (
         <div className="mt-2 grid gap-3 sm:grid-cols-2">
           {detail && (
