@@ -603,6 +603,64 @@ describe('lockfile handling', () => {
     expect(find(gs, LOCKFILE_TITLE)).toBeUndefined();
   });
 
+  it('does not mistake "version" inside URLs or other fields for a version change', () => {
+    const resolved = [
+      '-      "resolved": "https://r.example/versioned-package/-/versioned-package-1.0.0.tgz",',
+      '+      "resolved": "https://evil.example/versioned-package/-/versioned-package-1.0.0.tgz",',
+    ];
+    const gs = run([mkFile('package.json', ['+x']), mkFile('package-lock.json', resolved)]);
+    expect(find(gs, LOCKFILE_TITLE)).toMatchObject({ risk: 'high', autoClear: false });
+    const meta = run([
+      mkFile('package.json', ['+x']),
+      mkFile('package-lock.json', [
+        '+      "versionedAt": "now",',
+        '+      "engines": { "node-version": ">=18" },',
+        '-      "integrity": "sha512-aaa",',
+        '+      "integrity": "sha512-bbb",',
+      ]),
+    ]);
+    expect(find(meta, LOCKFILE_TITLE)).toMatchObject({ risk: 'high' });
+  });
+
+  it('recognises per-format version fields and go.sum module version changes', () => {
+    const sumLine = (m: string, v: string, h: string) => `${m} ${v} h1:${h}=`;
+    const goBump = run([
+      mkFile('go.mod', ['+x']),
+      mkFile('go.sum', [
+        '-' + sumLine('a.io/m', 'v1.0.0', 'aaa'),
+        '+' + sumLine('a.io/m', 'v1.0.1', 'bbb'),
+      ]),
+    ]);
+    expect(find(goBump, LOCKFILE_TITLE)).toBeUndefined();
+    const goHash = run([
+      mkFile('go.mod', ['+x']),
+      mkFile('go.sum', [
+        '-' + sumLine('a.io/m', 'v1.0.0', 'aaa'),
+        '+' + sumLine('a.io/m', 'v1.0.0', 'bbb'),
+        '+' + sumLine('b.io/n', 'v2.0.0', 'ccc'),
+      ]),
+    ]);
+    expect(find(goHash, LOCKFILE_TITLE)).toMatchObject({ risk: 'high' });
+    const cargo = run([
+      mkFile('Cargo.toml', ['+x']),
+      mkFile('Cargo.lock', [
+        '-version = "1.0.0"',
+        '+version = "1.0.1"',
+        '-checksum = "a"',
+        '+checksum = "b"',
+      ]),
+    ]);
+    expect(find(cargo, LOCKFILE_TITLE)).toBeUndefined();
+    const unknown = run([
+      mkFile('mix.exs', ['+x']),
+      mkFile('mix.lock', [
+        '-  "a": {:hex, :a, "1.0.0", "sha256-aaa"}',
+        '+  "a": {:hex, :a, "1.0.1", "sha256-bbb"}',
+      ]),
+    ]);
+    expect(find(unknown, LOCKFILE_TITLE)).toMatchObject({ risk: 'high' });
+  });
+
   it('matches nested manifests by directory and root lockfiles to any manifest', () => {
     const nested = run([
       mkFile('packages/a/package.json', ['+x']),
