@@ -48,6 +48,33 @@ export function AnalysisError({ view, onView }: { view: ViewMode; onView(v: View
   );
 }
 
+/** A successful analysis that found nothing to group. */
+export function AnalysisEmpty({ summary, onView }: { summary: string; onView(v: ViewMode): void }) {
+  return (
+    <div
+      data-testid="analysis-empty"
+      className="rounded border border-gray-200 p-4 dark:border-gray-800"
+    >
+      {summary && (
+        <p className="mb-3 text-sm">
+          <span className="font-semibold">Summary: </span>
+          {summary}
+        </p>
+      )}
+      <p className="text-sm text-gray-700 dark:text-gray-300">
+        No groups to review — the analysis found nothing to group.
+      </p>
+      <button
+        type="button"
+        className="mt-3 rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800"
+        onClick={() => onView('file')}
+      >
+        Review by file
+      </button>
+    </div>
+  );
+}
+
 /** Says which provider produced the displayed groups while a switch is running or has failed. */
 export function ProviderNotice() {
   const { result, providers, choice, loading, error } = useAnalysis();

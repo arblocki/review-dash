@@ -3,6 +3,7 @@ import { AnalysisProvider, useAnalysis } from './analysis';
 import { AnalysisBar } from './components/AnalysisBar';
 import {
   AnalysisBanner,
+  AnalysisEmpty,
   AnalysisError,
   AnalysisSkeleton,
   ProviderNotice,
@@ -16,6 +17,7 @@ import { Header } from './components/Header';
 import { Layout } from './components/Layout';
 import { SubmitModal } from './components/SubmitModal';
 import { groupNeighbors, orderGroups, pickGroup, resolveView, type ViewMode } from './lib/groups';
+import { mainPaneState } from './lib/mainPane';
 import { fileThreadOwners } from './lib/sections';
 import { ReviewProvider, useReview } from './state';
 
@@ -57,8 +59,9 @@ function Review() {
     [],
   );
 
+  const pane = mainPaneState({ loading, error, analysis, group, stale });
   let main;
-  if (view === 'file') {
+  if (view === 'file' || pane === 'stale') {
     main = (
       <>
         <AnalysisBanner />
@@ -66,7 +69,7 @@ function Review() {
         <AllFilesDiff />
       </>
     );
-  } else if (group && analysis) {
+  } else if (pane === 'group' && group && analysis) {
     main = (
       <>
         {error && !loading && <AnalysisError view={view} onView={setChoice} />}
@@ -84,7 +87,14 @@ function Review() {
         />
       </>
     );
-  } else if (error && !loading) {
+  } else if (pane === 'empty' && analysis) {
+    main = (
+      <>
+        {error && !loading && <AnalysisError view={view} onView={setChoice} />}
+        <AnalysisEmpty summary={analysis.summary} onView={setChoice} />
+      </>
+    );
+  } else if (pane === 'error') {
     main = <AnalysisError view={view} onView={setChoice} />;
   } else {
     main = <AnalysisSkeleton />;
