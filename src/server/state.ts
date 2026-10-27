@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { GitHubClient, PrCommit } from '../core/github/types.js';
 import type { PrData } from '../core/pr-data.js';
 import type { PrRef } from '../core/pr-ref.js';
+import { reviewItemIds } from '../core/review-items.js';
 import type { Store } from '../core/store/index.js';
 
 export async function parseBody<T>(c: { req: { json(): Promise<unknown> } }, schema: z.ZodType<T>) {
@@ -22,6 +23,9 @@ export async function parseBody<T>(c: { req: { json(): Promise<unknown> } }, sch
 }
 
 const reviewedSchema = z.object({
+  /** Head and diff the client was displaying when it marked. */
+  headSha: z.string().min(1),
+  diffHash: z.string().min(1),
   hunkIds: z.array(z.string().min(1)).max(10_000),
   reviewed: z.boolean(),
 });
@@ -80,9 +84,29 @@ export function registerStateApi(app: Hono, deps: RouteDeps): void {
   app.put('/api/reviewed', async (c) => {
     const body = await parseBody(c, reviewedSchema);
     if ('error' in body) return c.json({ error: body.error }, 400);
-    const { hunkIds, reviewed } = body.data;
-    if (reviewed) store.markReviewed(ref, hunkIds, (await getData()).pr.headSha);
-    else store.unmarkReviewed(ref, hunkIds);
+    const { hunkIds, reviewed, headSha, diffHash } = body.data;
+    const data = await getData();
+    if (headSha !== data.pr.headSha || diffHash !== data.diffHash) {
+      return c.json(
+        {
+          error: 'The pull request changed since it was loaded',
+          code: 'head_moved',
+          currentHeadSha: data.pr.headSha,
+          currentDiffHash: data.diffHash,
+        },
+        409,
+      );
+    }
+    if (reviewed) {
+      const known = new Set(reviewItemIds(data.files, data.pr.headSha));
+      const unknown = hunkIds.filter((id) => !known.has(id));
+      if (unknown.length > 0) {
+        return c.json({ error: `Unknown review item ids: ${unknown.join(', ')}`, unknown }, 400);
+      }
+      store.markReviewed(ref, hunkIds, data.pr.headSha);
+    } else {
+      store.unmarkReviewed(ref, hunkIds);
+    }
     return c.json({ ok: true });
   });
 

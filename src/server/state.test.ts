@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { parseFile } from '../core/diff/parse.js';
+import { diffHash, parseFile } from '../core/diff/parse.js';
 import type { RawFile } from '../core/diff/types.js';
+import { fileReviewKey } from '../core/review-items.js';
 import { openStore } from '../core/store/index.js';
 import { fakeGitHub, loadFixture } from '../core/testing/fakes.testutil.js';
 import { createApp } from './app.js';
@@ -15,6 +16,8 @@ const fixture = loadFixture();
 const HEAD = fixture.pr.headSha;
 const HEAD2 = '3333333333333333333333333333333333333333';
 const hunkIds = fixture.files.flatMap((f) => parseFile(f).hunks.map((h) => h.id));
+const DIFF_HASH = diffHash(fixture.files.map(parseFile));
+const at = { headSha: HEAD, diffHash: DIFF_HASH };
 
 function setup() {
   const github = fakeGitHub();
@@ -46,16 +49,16 @@ describe('review state routes', () => {
   it('marks and unmarks hunks, recording the head', async () => {
     const { call } = setup();
     const [a, b] = hunkIds;
-    expect((await call('PUT', '/api/reviewed', { hunkIds: [a, b], reviewed: true })).status).toBe(
-      200,
-    );
+    expect(
+      (await call('PUT', '/api/reviewed', { hunkIds: [a, b], reviewed: true, ...at })).status,
+    ).toBe(200);
     let s = (await call('GET', '/api/review-state')).json;
     expect([...s.reviewedHunkIds].sort()).toEqual([a, b].sort());
     expect(s.reviewedAt[a!]).toMatchObject({ headSha: HEAD });
     expect(typeof s.reviewedAt[a!].reviewedAt).toBe('string');
     expect(s.lastReviewedHeadSha).toBe(HEAD);
 
-    await call('PUT', '/api/reviewed', { hunkIds: [a], reviewed: false });
+    await call('PUT', '/api/reviewed', { hunkIds: [a], reviewed: false, ...at });
     s = (await call('GET', '/api/review-state')).json;
     expect(s.reviewedHunkIds).toEqual([b]);
   });
@@ -72,10 +75,96 @@ describe('review state routes', () => {
 
   it('validates bodies', async () => {
     const { call } = setup();
-    expect((await call('PUT', '/api/reviewed', { hunkIds: 'x', reviewed: true })).status).toBe(400);
+    expect(
+      (await call('PUT', '/api/reviewed', { hunkIds: 'x', reviewed: true, ...at })).status,
+    ).toBe(400);
     expect(
       (await call('PUT', '/api/verify', { groupKey: '', itemIndex: 0, checked: true })).status,
     ).toBe(400);
+  });
+});
+
+describe('PUT /api/reviewed validation', () => {
+  it('rejects a head the server has moved past and persists nothing', async () => {
+    const { call, github, store } = setup();
+    expect((await call('GET', '/api/pr')).json.pr.headSha).toBe(HEAD);
+    store.markReviewed(pr, [hunkIds[0]!], 'older-head');
+    github.setHead(HEAD2);
+    const moved = (await call('GET', '/api/pr?refresh=1')).json;
+    const r = await call('PUT', '/api/reviewed', { hunkIds: [hunkIds[1]], reviewed: true, ...at });
+    expect(r.status).toBe(409);
+    expect(r.json).toMatchObject({
+      code: 'head_moved',
+      currentHeadSha: HEAD2,
+      currentDiffHash: moved.diffHash,
+    });
+    expect(store.listReviewed(pr).map((x) => x.hunkId)).toEqual([hunkIds[0]]);
+    const inter = (await call('GET', '/api/interdiff')).json;
+    expect(inter.lastReviewedHeadSha).toBe('older-head');
+    const un = await call('PUT', '/api/reviewed', {
+      hunkIds: [hunkIds[0]],
+      reviewed: false,
+      ...at,
+    });
+    expect(un.status).toBe(409);
+    expect(store.listReviewed(pr)).toHaveLength(1);
+  });
+
+  it('rejects a matching head with a different diff hash', async () => {
+    const { call, store } = setup();
+    const r = await call('PUT', '/api/reviewed', {
+      hunkIds: [hunkIds[0]],
+      reviewed: true,
+      headSha: HEAD,
+      diffHash: 'stale',
+    });
+    expect(r.status).toBe(409);
+    expect(store.listReviewed(pr)).toEqual([]);
+  });
+
+  it('rejects unknown ids with 400 and writes nothing', async () => {
+    const { call, store } = setup();
+    const r = await call('PUT', '/api/reviewed', {
+      hunkIds: [hunkIds[0], 'bogus', 'file:nope@x'],
+      reviewed: true,
+      ...at,
+    });
+    expect(r.status).toBe(400);
+    expect(r.json.unknown).toEqual(['bogus', 'file:nope@x']);
+    expect(store.listReviewed(pr)).toEqual([]);
+  });
+
+  it('accepts the review key of a hunkless file', async () => {
+    const binary: RawFile = {
+      filename: 'img/logo.png',
+      status: 'added',
+      additions: 0,
+      deletions: 0,
+      sha: 'blob123',
+    };
+    const github = fakeGitHub({ files: [...fixture.files, binary] });
+    const store = openStore(':memory:');
+    const app = createApp({ token: 't', pr, port: () => PORT, github, store });
+    const headers = {
+      host: `127.0.0.1:${PORT}`,
+      [TOKEN_HEADER]: 't',
+      'content-type': 'application/json',
+    };
+    const info = await (await app.request('/api/pr', { headers })).json();
+    const key = fileReviewKey(parseFile(binary), HEAD);
+    expect(key).toBe('file:img/logo.png@blob123');
+    const res = await app.request('/api/reviewed', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        hunkIds: [key],
+        reviewed: true,
+        headSha: HEAD,
+        diffHash: (info as Json).diffHash,
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(store.listReviewed(pr).map((x) => x.hunkId)).toEqual([key]);
   });
 });
 
