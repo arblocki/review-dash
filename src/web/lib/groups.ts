@@ -1,3 +1,4 @@
+import { fnv1a8 } from '../../core/hash';
 import { FILES_WITHOUT_DIFF_TITLE } from '../../core/group/types';
 import type { Analysis, AnalysisGroup, Hunk } from '../types';
 
@@ -96,15 +97,8 @@ export function groupOptionLabel(
   return `${riskBadge(g).label} · ${g.title} (${railCount(g)})`;
 }
 
-/** FNV-1a (32-bit) of a string as 8 hex chars; deterministic and non-cryptographic. */
-export function hash8(text: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(16).padStart(8, '0');
-}
+/** FNV-1a (32-bit) of a string as 8 hex chars (shared with the server's verify-check keys). */
+export const hash8 = fnv1a8;
 
 /**
  * Stable id for one verify checkbox: `${groupKey}:${index}:${hash8(text)}`. The text hash means a

@@ -33,8 +33,13 @@ const reviewedSchema = z.object({
 const verifySchema = z.object({
   groupKey: z.string().min(1),
   itemIndex: z.number().int().nonnegative(),
+  /** fnv1a8 of the item text, so a changed checklist does not inherit old checkmarks. */
+  itemHash: z.string().regex(/^[0-9a-f]{8}$/),
   checked: z.boolean(),
 });
+
+/** Stored verify keys are `${groupKey}#${itemHash}`; group_key needs no migration. */
+const VERIFY_KEY = /^(.*)#([0-9a-f]{8})$/s;
 
 interface RouteDeps {
   pr: PrRef;
@@ -66,9 +71,12 @@ export function registerStateApi(app: Hono, deps: RouteDeps): void {
 
   app.get('/api/review-state', (c) => {
     const reviewed = store.listReviewed(ref);
-    const verifyChecks: Record<string, number[]> = {};
+    const verifyChecks: Record<string, { index: number; itemHash: string }[]> = {};
     for (const v of store.listVerifyChecks(ref)) {
-      if (v.checked) (verifyChecks[v.groupKey] ??= []).push(v.itemIndex);
+      const m = VERIFY_KEY.exec(v.groupKey);
+      // Rows saved before the item hash was part of the key have no '#<hash>': ignored.
+      if (!v.checked || !m) continue;
+      (verifyChecks[m[1]!] ??= []).push({ index: v.itemIndex, itemHash: m[2]! });
     }
     const last = store.getLastReviewedHeadSha(ref);
     return c.json({
@@ -113,7 +121,8 @@ export function registerStateApi(app: Hono, deps: RouteDeps): void {
   app.put('/api/verify', async (c) => {
     const body = await parseBody(c, verifySchema);
     if ('error' in body) return c.json({ error: body.error }, 400);
-    store.setVerifyCheck(ref, body.data.groupKey, body.data.itemIndex, body.data.checked);
+    const { groupKey, itemHash, itemIndex, checked } = body.data;
+    store.setVerifyCheck(ref, `${groupKey}#${itemHash}`, itemIndex, checked);
     return c.json({ ok: true });
   });
 

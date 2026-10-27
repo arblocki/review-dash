@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { diffHash, parseFile } from '../core/diff/parse.js';
 import type { RawFile } from '../core/diff/types.js';
+import { fnv1a8 } from '../core/hash.js';
 import { fileReviewKey } from '../core/review-items.js';
 import { openStore } from '../core/store/index.js';
 import { fakeGitHub, loadFixture } from '../core/testing/fakes.testutil.js';
@@ -63,14 +64,36 @@ describe('review state routes', () => {
     expect(s.reviewedHunkIds).toEqual([b]);
   });
 
-  it('stores verify checks per group', async () => {
-    const { call } = setup();
-    await call('PUT', '/api/verify', { groupKey: 'g1', itemIndex: 1, checked: true });
-    await call('PUT', '/api/verify', { groupKey: 'g1', itemIndex: 0, checked: true });
-    await call('PUT', '/api/verify', { groupKey: 'g1', itemIndex: 0, checked: false });
-    await call('PUT', '/api/verify', { groupKey: 'g2', itemIndex: 2, checked: true });
+  it('stores verify checks per group and item text', async () => {
+    const { call, store } = setup();
+    const X = fnv1a8('check X');
+    const Y = fnv1a8('check Y');
+    const put = (groupKey: string, itemIndex: number, itemHash: string, checked: boolean) =>
+      call('PUT', '/api/verify', { groupKey, itemIndex, itemHash, checked });
+    await put('g1', 1, X, true);
+    await put('g1', 0, X, true);
+    await put('g1', 0, X, false);
+    await put('g2', 2, Y, true);
+    // An old-format row (no '#hash') is ignored.
+    store.setVerifyCheck(pr, 'legacy', 0, true);
     const s = (await call('GET', '/api/review-state')).json;
-    expect(s.verifyChecks).toEqual({ g1: [1], g2: [2] });
+    expect(s.verifyChecks).toEqual({
+      g1: [{ index: 1, itemHash: X }],
+      g2: [{ index: 2, itemHash: Y }],
+    });
+  });
+
+  it('does not carry a check over to different text at the same index', async () => {
+    const { call } = setup();
+    const X = fnv1a8('check X');
+    const Y = fnv1a8('check Y');
+    await call('PUT', '/api/verify', { groupKey: 'g', itemIndex: 0, itemHash: X, checked: true });
+    const checkedFor = async (hash: string) =>
+      (await call('GET', '/api/review-state')).json.verifyChecks.g?.some(
+        (c: Json) => c.index === 0 && c.itemHash === hash,
+      ) ?? false;
+    expect(await checkedFor(Y)).toBe(false);
+    expect(await checkedFor(X)).toBe(true);
   });
 
   it('validates bodies', async () => {
@@ -79,7 +102,17 @@ describe('review state routes', () => {
       (await call('PUT', '/api/reviewed', { hunkIds: 'x', reviewed: true, ...at })).status,
     ).toBe(400);
     expect(
-      (await call('PUT', '/api/verify', { groupKey: '', itemIndex: 0, checked: true })).status,
+      (
+        await call('PUT', '/api/verify', {
+          groupKey: '',
+          itemIndex: 0,
+          itemHash: 'abcdef12',
+          checked: true,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (await call('PUT', '/api/verify', { groupKey: 'g', itemIndex: 0, checked: true })).status,
     ).toBe(400);
   });
 });
