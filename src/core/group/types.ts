@@ -16,6 +16,7 @@ export type GroupKind = (typeof GROUP_KINDS)[number];
 export const UNCLASSIFIED_TITLE = 'Unclassified — must read';
 export const MECHANICAL_TITLE = 'Mechanical changes';
 export const MECHANICAL_FLAGGED_TITLE = 'Mechanical changes — flagged by risk rules';
+export const FILES_WITHOUT_DIFF_TITLE = 'Files without a diff — review on GitHub';
 export const LOCKFILE_TITLE = 'Lockfile changes — verify';
 
 /** A group on its way through validate -> risk -> order. */
@@ -27,6 +28,8 @@ export interface DraftGroup {
   riskReasons: string[];
   verify: string[];
   hunkIds: string[];
+  /** Paths of files with no hunks (patch missing, binary, pure rename) that this group covers. */
+  files?: string[];
   /** Indices into the LLM's `groups` array (not remapped yet). */
   dependsOnIdx: number[];
   /** Position in the LLM's `groups` array; -1 for synthetic groups. */
@@ -47,6 +50,8 @@ export interface AnalysisGroup {
   verify: string[];
   /** Ordered by path, then new-file line. */
   hunkIds: string[];
+  /** Paths of hunkless files (patch missing, binary, pure rename); each lands in exactly one group. */
+  files: string[];
   /** Keys of groups that should be read first. */
   dependsOn: string[];
   autoClear: boolean;

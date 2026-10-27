@@ -166,7 +166,7 @@ export async function analyzePr(input: AnalyzeInput): Promise<Analysis> {
     step?.output,
     classified,
     input.files.map((f) => f.path),
-    { rules },
+    { rules, files: input.files },
   );
   const finalized = validated.groups.map((g) => applyRisk(g, hunkById, rules));
   const groups: AnalysisGroup[] = orderGroups(finalized, hunkById).map((g) => {
@@ -179,6 +179,7 @@ export async function analyzePr(input: AnalyzeInput): Promise<Analysis> {
       riskReasons: g.riskReasons,
       verify: g.verify,
       hunkIds: g.hunkIds,
+      files: g.files,
       dependsOn: g.dependsOn,
       autoClear: g.autoClear ?? false,
     };
@@ -186,10 +187,13 @@ export async function analyzePr(input: AnalyzeInput): Promise<Analysis> {
     return out;
   });
 
+  const hunkless = groups.reduce((n, g) => n + g.files.length, 0);
   let summary: string;
   if (step) summary = step.output.summary;
   else if (fallback) {
     summary = `${reviewable.length} hunks in ${new Set(reviewable.map((c) => c.hunk.path)).size} files, grouped by directory because the model's output was unusable.`;
+  } else if (hunkless > 0) {
+    summary = `${classified.length > 0 ? `${classified.length} mechanical hunks and ` : 'No reviewable hunks; '}${hunkless} file${hunkless === 1 ? '' : 's'} without a diff (missing patch, binary or renamed). Check the groups that list them.`;
   } else if (classified.length > 0) {
     summary = `Only mechanical changes (${classified.length} hunks).`;
   } else summary = 'No reviewable hunks in this pull request.';

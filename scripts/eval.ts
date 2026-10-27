@@ -66,7 +66,7 @@ for (const file of names) {
       .filter(Boolean)
       .join(',');
     console.log(
-      `  ${g.risk.toUpperCase().padEnd(6)} ${String(g.hunkIds.length).padStart(3)} hunks  ${g.title}${flags ? ` (${flags})` : ''}`,
+      `  ${g.risk.toUpperCase().padEnd(6)} ${String(g.hunkIds.length).padStart(3)} hunks${g.files.length ? ` +${g.files.length} files` : ''}  ${g.title}${flags ? ` (${flags})` : ''}`,
     );
   }
   const u = a.usage;

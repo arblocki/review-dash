@@ -2,11 +2,12 @@ import { createHash } from 'node:crypto';
 import type { Hunk } from '../diff/types.js';
 import type { DraftGroup } from './types.js';
 
-export type OrderedGroup = DraftGroup & { key: string; dependsOn: string[] };
+export type OrderedGroup = DraftGroup & { key: string; files: string[]; dependsOn: string[] };
 
-export function groupKey(hunkIds: readonly string[]): string {
+/** Stable key over the group's hunk ids and `file:<path>` entries for its hunkless files. */
+export function groupKey(hunkIds: readonly string[], files: readonly string[] = []): string {
   return createHash('sha1')
-    .update([...hunkIds].sort().join('\n'))
+    .update([...hunkIds, ...files.map((f) => `file:${f}`)].sort().join('\n'))
     .digest('hex')
     .slice(0, 16);
 }
@@ -33,7 +34,8 @@ export function orderGroups(
       if (!ha || !hb) return 0;
       return ha.path < hb.path ? -1 : ha.path > hb.path ? 1 : ha.newStart - hb.newStart;
     });
-    return { ...g, hunkIds, key: groupKey(hunkIds) };
+    const files = [...(g.files ?? [])].sort();
+    return { ...g, hunkIds, files, key: groupKey(hunkIds, files) };
   });
 
   const keyByLlmIndex = new Map<number, string>();

@@ -6,9 +6,13 @@ import {
 } from '../classify/lockfile.js';
 import { BUILTIN_RULES, firedRules, ruleMatchesHunk, type RiskRule } from '../risk/rules.js';
 import { maxRisk, type Risk } from '../risk/types.js';
+import { classifyFile } from '../classify/index.js';
+import type { ParsedFile } from '../diff/types.js';
+import { ruleMatchesTarget } from '../risk/rules.js';
 import type { GroupingOutput } from './prompt.js';
 import {
   LOCKFILE_TITLE,
+  FILES_WITHOUT_DIFF_TITLE,
   MECHANICAL_FLAGGED_TITLE,
   MECHANICAL_TITLE,
   UNCLASSIFIED_TITLE,
@@ -18,6 +22,8 @@ import {
 export interface ValidateOptions {
   /** Rules used to vet mechanical hunks (defaults to the built-ins). */
   rules?: readonly RiskRule[];
+  /** All changed files; those without hunks are placed in `files` of exactly one group. */
+  files?: readonly ParsedFile[];
 }
 
 export interface ValidateResult {
@@ -137,10 +143,35 @@ function finishValidation(
     if (f.risk === 'low') clean.push(c);
     else risky.push({ hunk: c, ...f });
   }
-  const mech = mechanicalGroup(clean);
+  const cleanFiles: string[] = [];
+  const riskyFiles: { path: string; risk: Risk; reasons: string[] }[] = [];
+  const noDiff: ParsedFile[] = [];
+  for (const f of opts.files ?? []) {
+    if (f.hunks.length > 0) continue;
+    const pureRename =
+      (f.status === 'renamed' || f.status === 'copied') &&
+      !f.patchMissing &&
+      !f.binary &&
+      f.additions === 0 &&
+      f.deletions === 0;
+    if (!pureRename) {
+      noDiff.push(f);
+      continue;
+    }
+    const tags = classifyFile(f);
+    const paths = f.oldPath ? [f.path, f.oldPath] : [f.path];
+    const fired = firedRules(rules, (r) =>
+      paths.some((path) => ruleMatchesTarget(r, { path, tags, changed: [] })),
+    );
+    if (fired.risk === 'low') cleanFiles.push(f.path);
+    else riskyFiles.push({ path: f.path, ...fired });
+  }
+  const mech = mechanicalGroup(clean, cleanFiles);
   if (mech) groups.push(mech);
-  const flaggedMech = flaggedMechanicalGroup(risky);
+  const flaggedMech = flaggedMechanicalGroup(risky, riskyFiles);
   if (flaggedMech) groups.push(flaggedMech);
+  const noDiffGroup = filesWithoutDiffGroup(noDiff);
+  if (noDiffGroup) groups.push(noDiffGroup);
   return { groups, backfilled, unknownIds, duplicateIds };
 }
 
@@ -172,9 +203,12 @@ function lockfileGroup(
   };
 }
 
-export function mechanicalGroup(hunks: readonly ClassifiedHunk[]): DraftGroup | undefined {
+export function mechanicalGroup(
+  hunks: readonly ClassifiedHunk[],
+  files: readonly string[] = [],
+): DraftGroup | undefined {
   const ids = hunks.filter((c) => c.mechanical).map((c) => c.hunk.id);
-  if (ids.length === 0) return undefined;
+  if (ids.length === 0 && files.length === 0) return undefined;
   return {
     title: MECHANICAL_TITLE,
     intent: 'Generated code, snapshots, vendored code, renames and whitespace-only edits.',
@@ -183,6 +217,7 @@ export function mechanicalGroup(hunks: readonly ClassifiedHunk[]): DraftGroup | 
     riskReasons: [],
     verify: [],
     hunkIds: ids,
+    files: [...files],
     dependsOnIdx: [],
     llmIndex: -1,
     mechanical: true,
@@ -193,11 +228,12 @@ export function mechanicalGroup(hunks: readonly ClassifiedHunk[]): DraftGroup | 
 /** Mechanical hunks that trip a medium/high risk rule: never auto-cleared, never `mechanical: true`. */
 function flaggedMechanicalGroup(
   risky: readonly { hunk: ClassifiedHunk; risk: Risk; reasons: string[] }[],
+  riskyFiles: readonly { path: string; risk: Risk; reasons: string[] }[] = [],
 ): DraftGroup | undefined {
-  if (risky.length === 0) return undefined;
+  if (risky.length === 0 && riskyFiles.length === 0) return undefined;
   let risk: Risk = 'medium';
   const riskReasons: string[] = [];
-  for (const r of risky) {
+  for (const r of [...risky, ...riskyFiles]) {
     risk = maxRisk(risk, r.risk);
     for (const reason of r.reasons) if (!riskReasons.includes(reason)) riskReasons.push(reason);
   }
@@ -210,6 +246,33 @@ function flaggedMechanicalGroup(
     riskReasons,
     verify: [],
     hunkIds: risky.map((r) => r.hunk.hunk.id),
+    files: riskyFiles.map((r) => r.path),
+    dependsOnIdx: [],
+    llmIndex: -1,
+    autoClear: false,
+  };
+}
+
+/** Hunkless files that are not pure renames: no diff from GitHub, binary, mode-only changes, empty files. */
+function filesWithoutDiffGroup(files: readonly ParsedFile[]): DraftGroup | undefined {
+  if (files.length === 0) return undefined;
+  const missing = files.filter((f) => f.patchMissing).length;
+  const binary = files.filter((f) => !f.patchMissing && f.binary).length;
+  const other = files.length - missing - binary;
+  const riskReasons: string[] = [];
+  if (missing > 0) riskReasons.push(`GitHub did not return a diff for ${missing} file(s)`);
+  if (binary > 0) riskReasons.push('Binary file(s) changed');
+  if (other > 0) riskReasons.push(`${other} file(s) changed without a textual diff`);
+  return {
+    title: FILES_WITHOUT_DIFF_TITLE,
+    intent:
+      'Files with no reviewable hunks here: too large for GitHub to diff, binary, or changed without text edits. Open them on GitHub.',
+    kind: 'other',
+    risk: 'medium',
+    riskReasons,
+    verify: [],
+    hunkIds: [],
+    files: files.map((f) => f.path),
     dependsOnIdx: [],
     llmIndex: -1,
     autoClear: false,

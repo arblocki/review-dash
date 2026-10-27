@@ -82,13 +82,23 @@ describe('GET /api/analysis', () => {
     expect(first.json.analysis.summary).toBe('fake summary');
     expect(first.json.analysis.promptVersion).toBe(PROMPT_VERSION);
     const groups = first.json.analysis.groups;
-    expect(groups[0]).toMatchObject({
+    expect(groups.find((g: Json) => g.title === 'All')).toMatchObject({
       title: 'All',
       risk: 'medium',
       dependsOn: [],
       autoClear: false,
     });
-    expect(groups).toHaveLength(1); // the fixture's lockfile has no patch, so no hunks
+    // The fixture also has a pure rename, a binary and a patch-less lockfile.
+    expect(groups.map((g: Json) => g.title)).toEqual([
+      'All',
+      'Files without a diff — review on GitHub',
+      'Mechanical changes',
+    ]);
+    expect(groups[1]).toMatchObject({
+      files: ['assets/logo.png', 'package-lock.json'],
+      autoClear: false,
+    });
+    expect(groups[2].files).toEqual(['src/hello.ts']);
     expect(groups[0].riskReasons).toContain('Changes exported (public API) declarations');
 
     const second = await get('/api/analysis');

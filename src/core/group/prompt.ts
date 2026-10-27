@@ -5,7 +5,7 @@ import { GROUP_KINDS } from './types.js';
 import type { Cluster } from './pregroup.js';
 
 /** Bump when prompt or schema changes: it is part of the analysis cache key. */
-export const PROMPT_VERSION = 'v1';
+export const PROMPT_VERSION = 'v2';
 
 export const DEFAULT_MAX_HUNK_LINES = 120;
 const MAX_REVIEW_MD_CHARS = 8000;

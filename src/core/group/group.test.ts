@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { classifyFiles, type ClassifiedHunk } from '../classify/index.js';
-import type { ParsedFile } from '../diff/types.js';
+import { parseFile } from '../diff/parse.js';
+import type { ParsedFile, RawFile } from '../diff/types.js';
 import { FakeProvider } from '../llm/fake.js';
 import { LlmError } from '../llm/types.js';
 import { analyzePr } from './analyze.js';
 import { mkFile } from './files.testutil.js';
 import { applyRisk } from '../risk/apply.js';
 import { BUILTIN_RULES } from '../risk/rules.js';
-import { orderGroups } from './order.js';
+import { groupKey, orderGroups } from './order.js';
 import { preGroup } from './pregroup.js';
 import { buildGroupingPrompt, groupingOutputSchema, type GroupingOutput } from './prompt.js';
 import {
+  FILES_WITHOUT_DIFF_TITLE,
   MECHANICAL_FLAGGED_TITLE,
   MECHANICAL_TITLE,
   UNCLASSIFIED_TITLE,
@@ -165,6 +167,79 @@ describe('mechanical hunks vs risk rules', () => {
       autoClear: false,
       riskReasons: ['Repo rule'],
     });
+  });
+});
+
+describe('files without hunks', () => {
+  const raw = (over: Partial<RawFile>): RawFile => ({
+    filename: 'f',
+    status: 'modified',
+    additions: 0,
+    deletions: 0,
+    ...over,
+  });
+  const run = (files: ParsedFile[]) =>
+    analyzePr({
+      pr: { title: 'T', body: '' },
+      files,
+      provider: new FakeProvider([]),
+      model: 'm',
+    });
+
+  it('keeps a patchMissing-only PR visible: medium risk, not auto-cleared', async () => {
+    const f = parseFile(raw({ filename: 'big.json', additions: 5000 }));
+    expect(f.patchMissing).toBe(true);
+    const a = await run([f]);
+    expect(a.summary).not.toMatch(/^No reviewable hunks in this/);
+    expect(a.groups).toHaveLength(1);
+    expect(a.groups[0]).toMatchObject({
+      title: FILES_WITHOUT_DIFF_TITLE,
+      kind: 'other',
+      risk: 'medium',
+      autoClear: false,
+      files: ['big.json'],
+      hunkIds: [],
+    });
+    expect(a.groups[0]!.riskReasons).toEqual(['GitHub did not return a diff for 1 file(s)']);
+  });
+
+  it('puts binary files in the files-without-diff group', async () => {
+    const f = parseFile(raw({ filename: 'logo.png', status: 'added' }));
+    expect(f.binary).toBe(true);
+    const a = await run([f]);
+    expect(a.groups[0]).toMatchObject({ title: FILES_WITHOUT_DIFF_TITLE, files: ['logo.png'] });
+    expect(a.groups[0]!.riskReasons).toEqual(['Binary file(s) changed']);
+  });
+
+  it('puts pure renames in the mechanical group, and risky ones in the flagged group', async () => {
+    const a = await run([
+      parseFile(raw({ filename: 'src/b.ts', previous_filename: 'src/a.ts', status: 'renamed' })),
+      parseFile(
+        raw({ filename: 'src/b2.ts', previous_filename: 'src/auth/b2.ts', status: 'renamed' }),
+      ),
+    ]);
+    const mech = a.groups.find((g) => g.title === MECHANICAL_TITLE)!;
+    expect(mech).toMatchObject({ files: ['src/b.ts'], autoClear: true });
+    const flagged = a.groups.find((g) => g.title === MECHANICAL_FLAGGED_TITLE)!;
+    expect(flagged).toMatchObject({ files: ['src/b2.ts'], risk: 'high', autoClear: false });
+    expect(a.summary).not.toMatch(/^No reviewable hunks in this/);
+  });
+
+  it('places every hunkless file in exactly one group and keys include the files', async () => {
+    const files = [
+      parseFile(raw({ filename: 'x.bin' })),
+      parseFile(raw({ filename: 'y.bin' })),
+      parseFile(raw({ filename: 'n.ts', previous_filename: 'o.ts', status: 'renamed' })),
+    ];
+    const a = await run(files);
+    const placed = a.groups.flatMap((g) => g.files);
+    expect(placed.sort()).toEqual(['n.ts', 'x.bin', 'y.bin']);
+    const b = await run(files.slice(0, 1));
+    expect(new Set([...a.groups, ...b.groups].map((g) => g.key)).size).toBe(
+      a.groups.length + b.groups.length,
+    );
+    expect(groupKey([], ['a'])).not.toBe(groupKey([], ['b']));
+    expect(groupKey(['h'])).toBe(groupKey(['h'], []));
   });
 });
 
