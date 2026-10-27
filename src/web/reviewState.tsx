@@ -14,6 +14,7 @@ import { verifyIdsFromWire, verifyWireArgs } from './lib/groups';
 import { filterSections } from './lib/reviewFilter';
 import { fileKeyMap } from './lib/reviewItems';
 import { reviewItemIds } from '../core/review-items';
+import { createReviewedSync } from './lib/reviewedSync';
 import { describeReviewedError } from './lib/reviewedError';
 import type { DiffSection } from './lib/sections';
 import { autoClearIds, hunkStatus, type HunkStatus } from './lib/progress';
@@ -88,12 +89,20 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
   const { session, files, pr, diffHash } = useReview();
   const { result, stale } = useAnalysis();
   const [reviewed, setReviewedState] = useState<ReadonlySet<string>>(new Set());
-  const [verifyChecked, setVerifyChecked] = useState<ReadonlySet<string>>(new Set());
-  const [interdiff, setInterdiff] = useState<InterdiffResponse | null>(null);
-  const [hideChoice, setHideChoice] = useState<boolean | null>(null);
   const [errorState, setErrorState] = useState<{ message: string; needsRefresh: boolean } | null>(
     null,
   );
+  const sync = useMemo(
+    () =>
+      createReviewedSync({
+        onChange: setReviewedState,
+        onError: (err) => setErrorState(describeReviewedError(err)),
+      }),
+    [],
+  );
+  const [verifyChecked, setVerifyChecked] = useState<ReadonlySet<string>>(new Set());
+  const [interdiff, setInterdiff] = useState<InterdiffResponse | null>(null);
+  const [hideChoice, setHideChoice] = useState<boolean | null>(null);
   const error = errorState?.message ?? null;
   const setError = useCallback(
     (message: string | null) => setErrorState(message ? { message, needsRefresh: false } : null),
@@ -107,8 +116,6 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
     loadSet(overrideKey),
   );
 
-  const reviewedRef = useRef(reviewed);
-  reviewedRef.current = reviewed;
   const verifyRef = useRef(verifyChecked);
   verifyRef.current = verifyChecked;
   const uncheckedRef = useRef(autoUnchecked);
@@ -131,12 +138,12 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
     api<ReviewStateResponse>('/api/review-state').then(
       (s) => {
         // Local edits made before this arrived win.
-        setReviewedState((cur) => new Set([...s.reviewedHunkIds, ...cur]));
+        sync.applySnapshot(s.reviewedHunkIds);
         setVerifyChecked((cur) => new Set([...verifyIdsFromWire(s.verifyChecks), ...cur]));
       },
       (err: unknown) => setError(`Could not load reviewed state: ${(err as Error).message}`),
     );
-  }, [setError]);
+  }, [setError, sync]);
 
   const reloadInterdiff = useCallback(async () => {
     try {
@@ -162,13 +169,12 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
 
   const setHunks = useCallback(
     (ids: string[], value: boolean) => {
-      const prev = reviewedRef.current;
-      const next = new Set(prev);
-      for (const id of ids) {
-        if (value) next.add(id);
-        else next.delete(id);
-      }
-      setReviewedState(next);
+      sync.setItems(ids, value, () =>
+        api('/api/reviewed', {
+          method: 'PUT',
+          ...jsonBody({ hunkIds: ids, reviewed: value, headSha: pr.headSha, diffHash }),
+        }),
+      );
       // Un-checking an auto-cleared hunk overrides the pre-check; checking clears the override.
       const o = new Set(uncheckedRef.current);
       for (const id of ids) {
@@ -177,23 +183,8 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
       }
       setAutoUnchecked(o);
       saveSet(overrideKey, o);
-      api('/api/reviewed', {
-        method: 'PUT',
-        ...jsonBody({ hunkIds: ids, reviewed: value, headSha: pr.headSha, diffHash }),
-      }).catch((err: unknown) => {
-        // Roll back just these ids.
-        setReviewedState((cur) => {
-          const rolled = new Set(cur);
-          for (const id of ids) {
-            if (prev.has(id)) rolled.add(id);
-            else rolled.delete(id);
-          }
-          return rolled;
-        });
-        setErrorState(describeReviewedError(err));
-      });
     },
-    [overrideKey, pr.headSha, diffHash],
+    [sync, overrideKey, pr.headSha, diffHash],
   );
 
   const status = useCallback(
@@ -203,10 +194,10 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
 
   const toggleHunk = useCallback(
     (id: string) => {
-      const s = hunkStatus(id, reviewedRef.current, autoRef.current, uncheckedRef.current);
+      const s = hunkStatus(id, sync.current(), autoRef.current, uncheckedRef.current);
       setHunks([id], s === 'none');
     },
-    [setHunks],
+    [sync, setHunks],
   );
 
   const toggleVerify = useCallback(
