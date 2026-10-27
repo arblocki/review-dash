@@ -21,7 +21,7 @@ const FILES: ParsedFile[] = [
   mkFile('docs/guide.md', ['+hello']),
   mkFile('package.json', ['+"dep": "1"']),
   mkFile('package-lock.json', ['+lock']),
-  mkFile('src/gen.ts', ['-  a  b', '+a b']),
+  mkFile('src/gen.ts', ['-  a b', '+a b']),
   mkFile('README.md', ['+x']),
 ];
 

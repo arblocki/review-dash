@@ -33,11 +33,34 @@ describe('classifyPath', () => {
 });
 
 describe('hunk tags', () => {
-  it('detects whitespace-only changes, including re-wrapping', () => {
-    const f = mkFile('a.ts', ['-  foo( a, b )', '+foo(a,', '+  b)']);
-    expect(isWhitespaceOnly(f.hunks[0]!)).toBe(true);
-    const g = mkFile('a.ts', ['-foo(a)', '+foo(b)']);
-    expect(isWhitespaceOnly(g.hunks[0]!)).toBe(false);
+  describe('isWhitespaceOnly', () => {
+    const ws = (path: string, rows: string[]) => isWhitespaceOnly(mkFile(path, rows).hunks[0]!);
+    it('rejects whitespace removed inside a string literal', () => {
+      expect(ws('a.ts', ['-const r = "admin user";', '+const r = "adminuser";'])).toBe(false);
+    });
+    it('rejects Python re-indentation', () => {
+      expect(ws('a.py', ['-    run()', '+        run()'])).toBe(false);
+    });
+    it('accepts JS re-indentation', () => {
+      expect(ws('a.ts', ['-    run();', '+        run();'])).toBe(true);
+    });
+    it('treats unknown extensions as indentation sensitive', () => {
+      expect(ws('a.weird', ['-  x', '+    x'])).toBe(false);
+      expect(ws('Makefile', ['-\tx', '+  x'])).toBe(false);
+    });
+    it('accepts trailing-whitespace-only changes, even in Python', () => {
+      expect(ws('a.py', ['-run()', '+run()  '])).toBe(true);
+    });
+    it('accepts blank-line-only changes', () => {
+      expect(ws('a.py', ['+', ' x', '-'])).toBe(true);
+    });
+    it('rejects re-wrapped lines', () => {
+      expect(ws('a.ts', ['-  foo( a, b )', '+foo(a,', '+  b)'])).toBe(false);
+      expect(ws('a.ts', ['-foo(a, b)', '+foo(a,', '+  b)'])).toBe(false);
+    });
+    it('rejects real edits', () => {
+      expect(ws('a.ts', ['-foo(a)', '+foo(b)'])).toBe(false);
+    });
   });
 
   it('detects comment-only changes per language', () => {
@@ -74,7 +97,7 @@ describe('hunk tags', () => {
     const hunks = classifyFiles([
       mkFile('package-lock.json', ['+x']),
       mkFile('src/a.ts', ['+x']),
-      mkFile('src/b.ts', ['-a  b', '+a b']),
+      mkFile('src/b.ts', ['-a b  ', '+a b']),
       mkFile('src/c.ts', ['+// c']),
     ]);
     expect(hunks.map((h) => h.mechanical)).toEqual([true, false, true, false]);

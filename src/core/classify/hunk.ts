@@ -1,20 +1,92 @@
 import type { DiffLine, Hunk } from '../diff/types.js';
 import type { Tag } from './tags.js';
 
-const stripWs = (s: string): string => s.replace(/\s+/g, '');
+/** Languages where leading indentation is syntax or can change meaning; also the default for unknown types. */
+const INDENT_SENSITIVE_EXT = new Set([
+  'py',
+  'pyi',
+  'yaml',
+  'yml',
+  'mk',
+  'haml',
+  'pug',
+  'slim',
+  'coffee',
+  'nim',
+  'sass',
+  'styl',
+  'fs',
+  'fsx',
+  'hs',
+  'elm',
+]);
 
-/** Removed and added text are identical once whitespace is ignored (indent, re-wrap, trailing). */
-export function isWhitespaceOnly(hunk: Hunk): boolean {
-  let dels = '';
-  let adds = '';
+/** Extensions known to ignore leading indentation. Anything else is treated as sensitive. */
+const INDENT_INSENSITIVE_EXT = new Set([
+  'ts',
+  'tsx',
+  'js',
+  'jsx',
+  'mjs',
+  'cjs',
+  'java',
+  'kt',
+  'go',
+  'rs',
+  'c',
+  'h',
+  'cc',
+  'cpp',
+  'hpp',
+  'cs',
+  'swift',
+  'scala',
+  'php',
+  'dart',
+  'css',
+  'scss',
+  'less',
+  'json',
+  'jsonc',
+  'html',
+  'xml',
+  'vue',
+  'svelte',
+  'sql',
+  'toml',
+  'tf',
+]);
+
+function isIndentSensitive(path: string): boolean {
+  const base = (path.split('/').pop() ?? path).toLowerCase();
+  if (base === 'makefile' || base === 'gnumakefile') return true;
+  const ext = base.includes('.') ? base.split('.').pop()! : '';
+  if (INDENT_SENSITIVE_EXT.has(ext)) return true;
+  return !INDENT_INSENSITIVE_EXT.has(ext);
+}
+
+/**
+ * Conservative: removed and added non-blank lines pair up 1:1 in order and each pair differs only
+ * in trailing whitespace, or in leading indentation when the language is not indentation
+ * sensitive; blank-line additions/removals are fine. Whitespace inside a line never qualifies.
+ */
+export function isWhitespaceOnly(hunk: Hunk, path: string = hunk.path): boolean {
+  const sensitive = isIndentSensitive(path);
+  const dels: string[] = [];
+  const adds: string[] = [];
   let changed = 0;
   for (const l of hunk.lines) {
-    if (l.type === 'del') dels += stripWs(l.content);
-    else if (l.type === 'add') adds += stripWs(l.content);
-    else continue;
+    if (l.type === 'context') continue;
     changed++;
+    if (l.content.trim() === '') continue;
+    (l.type === 'del' ? dels : adds).push(l.content);
   }
-  return changed > 0 && dels === adds;
+  if (changed === 0 || dels.length !== adds.length) return false;
+  return dels.every((d, i) => {
+    const a = adds[i]!;
+    if (d.trimEnd() === a.trimEnd()) return true;
+    return !sensitive && d.trim() === a.trim();
+  });
 }
 
 interface CommentStyle {
@@ -96,7 +168,7 @@ export function isCommentOnly(hunk: Hunk): boolean {
 /** File-level tags plus content checks for one hunk. */
 export function classifyHunk(hunk: Hunk, fileTags: readonly Tag[]): Tag[] {
   const tags = new Set<Tag>(fileTags);
-  if (isWhitespaceOnly(hunk)) tags.add('whitespace-only');
+  if (isWhitespaceOnly(hunk, hunk.path)) tags.add('whitespace-only');
   if (isCommentOnly(hunk)) tags.add('comment-only');
   return [...tags];
 }
