@@ -24,6 +24,7 @@ export function GroupCard({
   group,
   allGroups,
   neighbors,
+  fileThreadPaths,
   checked,
   onToggleVerify,
   onSelect,
@@ -32,6 +33,8 @@ export function GroupCard({
   allGroups: AnalysisGroup[];
   /** Position and prev/next keys in the displayed order, for the narrow-screen buttons. */
   neighbors: GroupNeighbors;
+  /** Paths whose file-level discussion this card renders (see `fileThreadOwners`). */
+  fileThreadPaths: ReadonlySet<string>;
   /** Checked verify items, by `verifyId(group.key, index, text)`. */
   checked: ReadonlySet<string>;
   onToggleVerify(id: string): void;
@@ -161,7 +164,7 @@ export function GroupCard({
                 Hide hunks
               </button>
             )}
-            <HunkList sections={sections} />
+            <HunkList sections={sections} fileThreadPaths={fileThreadPaths} />
           </>
         ) : (
           <button

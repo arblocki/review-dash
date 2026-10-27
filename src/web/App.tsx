@@ -16,6 +16,7 @@ import { Header } from './components/Header';
 import { Layout } from './components/Layout';
 import { SubmitModal } from './components/SubmitModal';
 import { groupNeighbors, orderGroups, pickGroup, resolveView, type ViewMode } from './lib/groups';
+import { fileThreadOwners } from './lib/sections';
 import { ReviewProvider, useReview } from './state';
 
 function Review() {
@@ -36,6 +37,11 @@ function Review() {
     [analysis, view],
   );
   const group = pickGroup(groups, selectedKey);
+  // Each file's unanchored threads render in one group only: the first that contains the file.
+  const fileThreadPaths = useMemo(() => {
+    const owners = fileThreadOwners(groups, files);
+    return new Set([...owners].filter(([, key]) => key === group?.key).map(([path]) => path));
+  }, [groups, files, group?.key]);
 
   const select = useCallback((key: string) => {
     setSelectedKey(key);
@@ -71,6 +77,7 @@ function Review() {
           group={group}
           allGroups={analysis.groups}
           neighbors={groupNeighbors(groups, group.key)}
+          fileThreadPaths={fileThreadPaths}
           checked={checked}
           onToggleVerify={toggleVerify}
           onSelect={select}
