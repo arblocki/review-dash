@@ -97,4 +97,34 @@ describe('createReviewedSync', () => {
     expect(t.ui().has('x')).toBe(true);
     expect(t.server.has('x')).toBe(true);
   });
+
+  describe('applySnapshot', () => {
+    it('does not resurrect an item unchecked before the snapshot arrived', async () => {
+      const t = setup();
+      t.server.add('x');
+      t.server.add('y');
+      // The user unchecks x while the initial GET is still pending (x looked unchecked locally).
+      const p = t.sync.setItems(['x'], false, t.req(['x'], false));
+      t.sync.applySnapshot(['x', 'y']);
+      expect([...t.ui()]).toEqual(['y']);
+      await p;
+      expect(t.server.has('x')).toBe(false);
+    });
+
+    it('keeps a locally checked item and takes server values for untouched ones', () => {
+      const t = setup();
+      void t.sync.setItems(['n'], true, t.req(['n'], true, new Promise(() => undefined)));
+      t.sync.applySnapshot(['y']);
+      expect([...t.ui()].sort()).toEqual(['n', 'y']);
+    });
+
+    it('rolls a touched item back to the server value when its save fails', async () => {
+      const t = setup();
+      t.server.add('x');
+      const p = t.sync.setItems(['x'], false, t.req(['x'], false, undefined, new Error('x')));
+      t.sync.applySnapshot(['x']);
+      await p;
+      expect(t.ui().has('x')).toBe(true);
+    });
+  });
 });

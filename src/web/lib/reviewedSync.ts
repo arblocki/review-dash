@@ -14,7 +14,10 @@ export interface ReviewedSync {
    * its last server-confirmed value unless a newer change to that item has been made since.
    */
   setItems(ids: readonly string[], reviewed: boolean, send: () => Promise<unknown>): Promise<void>;
-  /** Applies the server's reviewed ids (the initial load) alongside local changes. */
+  /**
+   * Applies the server's reviewed ids (the initial load). Items changed locally before this
+   * arrives keep their local value; the server's value is used only for untouched items.
+   */
   applySnapshot(serverIds: Iterable<string>): void;
 }
 
@@ -26,6 +29,8 @@ export function createReviewedSync(deps: ReviewedSyncDeps): ReviewedSync {
   // What the server is known to hold per item: its value before our first change, then the
   // value of the last save that succeeded.
   const confirmed = new Map<string, boolean>();
+  // Items with a successful save: the server value of those is ours, not the snapshot's.
+  const saved = new Set<string>();
   let queue: Promise<void> = Promise.resolve();
 
   const publish = (next: ReadonlySet<string>) => {
@@ -36,9 +41,17 @@ export function createReviewedSync(deps: ReviewedSyncDeps): ReviewedSync {
   return {
     current: () => state,
     applySnapshot(serverIds) {
-      const ids = [...serverIds];
-      for (const id of ids) if (!confirmed.has(id)) confirmed.set(id, true);
-      publish(new Set([...ids, ...state]));
+      const server = new Set(serverIds);
+      const next = new Set<string>();
+      // A touched item keeps its local value, but a failed save should return it to the server's.
+      for (const id of generation.keys()) if (!saved.has(id)) confirmed.set(id, server.has(id));
+      for (const id of server) {
+        if (generation.has(id)) continue;
+        confirmed.set(id, true);
+        next.add(id);
+      }
+      for (const id of state) if (generation.has(id)) next.add(id);
+      publish(next);
     },
     setItems(ids, reviewed, send) {
       const next = new Set(state);
@@ -55,7 +68,10 @@ export function createReviewedSync(deps: ReviewedSyncDeps): ReviewedSync {
 
       const run = queue.then(send).then(
         () => {
-          for (const id of ids) confirmed.set(id, reviewed);
+          for (const id of ids) {
+            confirmed.set(id, reviewed);
+            saved.add(id);
+          }
         },
         (err: unknown) => {
           const rolled = new Set(state);
