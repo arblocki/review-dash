@@ -152,6 +152,7 @@ export function parseFile(raw: RawFile): ParsedFile {
     hunks: parsePatch({ path: raw.filename, oldPath, status }, raw.patch),
   };
   if (oldPath) file.oldPath = oldPath;
+  if (raw.sha) file.blobSha = raw.sha;
   return file;
 }
 

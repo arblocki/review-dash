@@ -76,6 +76,10 @@ describe('parseFile', () => {
       hunks: [],
     });
   });
+  it('keeps the blob SHA when GitHub provides one', () => {
+    expect(parseFile({ ...raw[2]!, sha: 'abc123' }).blobSha).toBe('abc123');
+    expect(parseFile(raw[2]!).blobSha).toBeUndefined();
+  });
   it('flags binary files', () => {
     expect(parseFile(raw[2]!)).toMatchObject({ binary: true, patchMissing: false });
   });

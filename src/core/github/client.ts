@@ -133,6 +133,7 @@ export function createGitHubClient(deps: { rest: RestLike; gql: GraphqlLike }): 
         deletions: f.deletions ?? 0,
         changes: f.changes ?? 0,
         patch: f.patch,
+        ...(typeof f.sha === 'string' ? { sha: f.sha } : {}),
       }));
       const missing = files.filter((f) => f.patch === undefined && (f.changes ?? 0) > 0);
       if (missing.length > 0) {
