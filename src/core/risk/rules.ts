@@ -93,17 +93,43 @@ function changedContents(h: ClassifiedHunk): string[] {
   return h.hunk.lines.filter((l) => l.type !== 'context').map((l) => l.content);
 }
 
-export function ruleMatchesHunk(rule: RiskRule, h: ClassifiedHunk): boolean {
+/** Rule match against a path, its tags and the changed line contents (none for hunkless files). */
+export function ruleMatchesTarget(
+  rule: RiskRule,
+  target: { path: string; tags: readonly Tag[]; changed: readonly string[] },
+): boolean {
   if (!rule.glob && !rule.pathPattern && !rule.pattern) return false;
-  if (rule.excludeTags?.some((t) => h.tags.includes(t))) return false;
-  const path = h.hunk.path;
-  if (rule.glob && !matchGlob(rule.glob, path)) return false;
-  if (rule.pathPattern && !rule.pathPattern.test(path)) return false;
+  if (rule.excludeTags?.some((t) => target.tags.includes(t))) return false;
+  if (rule.glob && !matchGlob(rule.glob, target.path)) return false;
+  if (rule.pathPattern && !rule.pathPattern.test(target.path)) return false;
   if (rule.pattern) {
     const re = rule.pattern;
-    if (!changedContents(h).some((c) => re.test(c))) return false;
+    if (!target.changed.some((c) => re.test(c))) return false;
   }
   return true;
+}
+
+export function ruleMatchesHunk(rule: RiskRule, h: ClassifiedHunk): boolean {
+  return ruleMatchesTarget(rule, {
+    path: h.hunk.path,
+    tags: h.tags,
+    changed: changedContents(h),
+  });
+}
+
+/** Rules (without the large-deletion check) that fire on a single target, medium or higher. */
+export function firedRules(
+  rules: readonly RiskRule[],
+  matches: (rule: RiskRule) => boolean,
+): { risk: Risk; reasons: string[] } {
+  let risk: Risk = 'low';
+  const reasons: string[] = [];
+  for (const rule of rules) {
+    if (rule.risk === 'low' || !matches(rule)) continue;
+    risk = maxRisk(risk, rule.risk);
+    if (!reasons.includes(rule.reason)) reasons.push(rule.reason);
+  }
+  return { risk, reasons };
 }
 
 /** Applies rules (built-ins by default) plus the large-deletion check to one group's hunks. */

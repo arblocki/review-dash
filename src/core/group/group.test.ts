@@ -6,10 +6,17 @@ import { LlmError } from '../llm/types.js';
 import { analyzePr } from './analyze.js';
 import { mkFile } from './files.testutil.js';
 import { applyRisk } from '../risk/apply.js';
+import { BUILTIN_RULES } from '../risk/rules.js';
 import { orderGroups } from './order.js';
 import { preGroup } from './pregroup.js';
 import { buildGroupingPrompt, groupingOutputSchema, type GroupingOutput } from './prompt.js';
-import { MECHANICAL_TITLE, UNCLASSIFIED_TITLE, type Analysis, type DraftGroup } from './types.js';
+import {
+  MECHANICAL_FLAGGED_TITLE,
+  MECHANICAL_TITLE,
+  UNCLASSIFIED_TITLE,
+  type Analysis,
+  type DraftGroup,
+} from './types.js';
 import { UnionFind } from './union-find.js';
 import { validateGrouping } from './validate.js';
 import { LOCKFILE_TITLE } from './types.js';
@@ -113,6 +120,51 @@ describe('prompt', () => {
       groups: [{ title: 't', kind: 'weird', risk: 'huge', hunk_ids: ['a'] }],
     });
     expect(v.groups[0]).toMatchObject({ kind: 'other', risk: 'medium', depends_on: [] });
+  });
+});
+
+describe('mechanical hunks vs risk rules', () => {
+  const files = [
+    mkFile('dist/bundle.js', ['+x']),
+    mkFile('.github/workflows/gen.yml', ['+# @generated', '+on: push'], { start: 1 }),
+    mkFile('src/auth/token.generated.ts', ['+export const t = 1;'], { start: 1 }),
+  ];
+
+  it('pulls risky mechanical hunks into a flagged, never auto-cleared group', () => {
+    const c = classifyFiles(files);
+    expect(c.every((h) => h.mechanical)).toBe(true);
+    const r = validateGrouping(undefined, c);
+    const flagged = r.groups.find((g) => g.title === MECHANICAL_FLAGGED_TITLE)!;
+    expect(flagged).toMatchObject({ kind: 'mechanical', risk: 'high', autoClear: false });
+    expect(flagged.mechanical).toBeUndefined();
+    expect(flagged.riskReasons).toContain('Changes a CI workflow');
+    expect(flagged.hunkIds).toHaveLength(2);
+    const mech = r.groups.find((g) => g.title === MECHANICAL_TITLE)!;
+    expect(mech).toMatchObject({ risk: 'low', autoClear: true });
+    expect(mech.hunkIds).toHaveLength(1);
+    assertInvariant(r.groups, c);
+    const final = r.groups.map((g) =>
+      applyRisk(g, new Map(c.map((h) => [h.hunk.id, h])), BUILTIN_RULES),
+    );
+    expect(final.find((g) => g.title === MECHANICAL_FLAGGED_TITLE)!.autoClear).toBe(false);
+  });
+
+  it('honours per-repo rules passed to analyzePr', async () => {
+    const rules = [{ risk: 'medium' as const, reason: 'Repo rule', glob: 'dist/**' }];
+    const a = await analyzePr({
+      pr: { title: 'T', body: '' },
+      files: [files[0]!],
+      provider: new FakeProvider([]),
+      model: 'm',
+      rules,
+    });
+    expect(a.groups).toHaveLength(1);
+    expect(a.groups[0]).toMatchObject({
+      title: MECHANICAL_FLAGGED_TITLE,
+      risk: 'medium',
+      autoClear: false,
+      riskReasons: ['Repo rule'],
+    });
   });
 });
 

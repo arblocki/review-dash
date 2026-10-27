@@ -4,8 +4,21 @@ import {
   LOCKFILE_INTEGRITY_REASON,
   LOCKFILE_NO_MANIFEST_REASON,
 } from '../classify/lockfile.js';
+import { BUILTIN_RULES, firedRules, ruleMatchesHunk, type RiskRule } from '../risk/rules.js';
+import { maxRisk, type Risk } from '../risk/types.js';
 import type { GroupingOutput } from './prompt.js';
-import { LOCKFILE_TITLE, MECHANICAL_TITLE, UNCLASSIFIED_TITLE, type DraftGroup } from './types.js';
+import {
+  LOCKFILE_TITLE,
+  MECHANICAL_FLAGGED_TITLE,
+  MECHANICAL_TITLE,
+  UNCLASSIFIED_TITLE,
+  type DraftGroup,
+} from './types.js';
+
+export interface ValidateOptions {
+  /** Rules used to vet mechanical hunks (defaults to the built-ins). */
+  rules?: readonly RiskRule[];
+}
 
 export interface ValidateResult {
   groups: DraftGroup[];
@@ -28,6 +41,7 @@ export function validateGrouping(
   output: GroupingOutput | undefined,
   hunks: readonly ClassifiedHunk[],
   allPaths: readonly string[] = hunks.map((c) => c.hunk.path),
+  opts: ValidateOptions = {},
 ): ValidateResult {
   const known = new Map(hunks.map((c) => [c.hunk.id, c]));
   const placed = new Set<string>();
@@ -81,12 +95,21 @@ export function validateGrouping(
         unclassified: true,
       });
     }
-    return finishValidation(groups, hunks, allPaths, missing.length, unknownIds, duplicateIds);
+    return finishValidation(
+      groups,
+      hunks,
+      allPaths,
+      opts,
+      missing.length,
+      unknownIds,
+      duplicateIds,
+    );
   }
   return finishValidation(
     [...fallbackGrouping(reviewable)],
     hunks,
     allPaths,
+    opts,
     0,
     unknownIds,
     duplicateIds,
@@ -97,6 +120,7 @@ function finishValidation(
   groups: DraftGroup[],
   hunks: readonly ClassifiedHunk[],
   allPaths: readonly string[],
+  opts: ValidateOptions,
   backfilled: number,
   unknownIds: number,
   duplicateIds: number,
@@ -104,8 +128,19 @@ function finishValidation(
   const { flagged } = assessLockfileHunks(hunks, allPaths);
   const lock = lockfileGroup(hunks, flagged);
   if (lock) groups.push(lock);
-  const mech = mechanicalGroup(hunks.filter((c) => !flagged.has(c.hunk.id)));
+  const rules = opts.rules ?? BUILTIN_RULES;
+  const clean: ClassifiedHunk[] = [];
+  const risky: { hunk: ClassifiedHunk; risk: Risk; reasons: string[] }[] = [];
+  for (const c of hunks) {
+    if (!c.mechanical || flagged.has(c.hunk.id)) continue;
+    const f = firedRules(rules, (r) => ruleMatchesHunk(r, c));
+    if (f.risk === 'low') clean.push(c);
+    else risky.push({ hunk: c, ...f });
+  }
+  const mech = mechanicalGroup(clean);
   if (mech) groups.push(mech);
+  const flaggedMech = flaggedMechanicalGroup(risky);
+  if (flaggedMech) groups.push(flaggedMech);
   return { groups, backfilled, unknownIds, duplicateIds };
 }
 
@@ -152,6 +187,32 @@ export function mechanicalGroup(hunks: readonly ClassifiedHunk[]): DraftGroup | 
     llmIndex: -1,
     mechanical: true,
     autoClear: true,
+  };
+}
+
+/** Mechanical hunks that trip a medium/high risk rule: never auto-cleared, never `mechanical: true`. */
+function flaggedMechanicalGroup(
+  risky: readonly { hunk: ClassifiedHunk; risk: Risk; reasons: string[] }[],
+): DraftGroup | undefined {
+  if (risky.length === 0) return undefined;
+  let risk: Risk = 'medium';
+  const riskReasons: string[] = [];
+  for (const r of risky) {
+    risk = maxRisk(risk, r.risk);
+    for (const reason of r.reasons) if (!riskReasons.includes(reason)) riskReasons.push(reason);
+  }
+  return {
+    title: MECHANICAL_FLAGGED_TITLE,
+    intent:
+      'Generated, vendored, renamed or whitespace-only changes in files that risk rules cover. Look at these before trusting the label.',
+    kind: 'mechanical',
+    risk,
+    riskReasons,
+    verify: [],
+    hunkIds: risky.map((r) => r.hunk.hunk.id),
+    dependsOnIdx: [],
+    llmIndex: -1,
+    autoClear: false,
   };
 }
 

@@ -15,6 +15,7 @@ export type GroupKind = (typeof GROUP_KINDS)[number];
 
 export const UNCLASSIFIED_TITLE = 'Unclassified — must read';
 export const MECHANICAL_TITLE = 'Mechanical changes';
+export const MECHANICAL_FLAGGED_TITLE = 'Mechanical changes — flagged by risk rules';
 export const LOCKFILE_TITLE = 'Lockfile changes — verify';
 
 /** A group on its way through validate -> risk -> order. */

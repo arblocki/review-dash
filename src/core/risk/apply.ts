@@ -6,7 +6,8 @@ import { maxRisk } from './types.js';
 /**
  * Final risk = max(model, rules); rule reasons are appended to the model's reasons.
  * Sets `autoClear` (strict): every hunk is mechanical, docs, comment-only or
- * whitespace-only, and the final risk is still low. The mechanical group is left alone.
+ * whitespace-only, and the final risk is still low. Only the clean mechanical group (`mechanical: true`,
+ * already vetted hunk by hunk against the rules in validate) is passed through.
  */
 export function applyRisk(
   group: DraftGroup,
