@@ -719,3 +719,53 @@ describe('whitespace-only and comment-only hunks are never auto-cleared', () => 
     expect(groups.every((g) => !g.autoClear)).toBe(true);
   });
 });
+
+describe('large deletions in mechanical hunks', () => {
+  const del = (n: number) => Array.from({ length: n }, (_, i) => `-line${i}`);
+  const run = (files: ParsedFile[]) => {
+    const c = classifyFiles(files);
+    const r = validateGrouping(
+      undefined,
+      c,
+      files.map((f) => f.path),
+    );
+    const map = new Map(c.map((h) => [h.hunk.id, h]));
+    const groups = r.groups.map((g) => applyRisk(g, map));
+    assertInvariant(groups, c);
+    return groups;
+  };
+  const find = (gs: DraftGroup[], t: string) => gs.find((g) => g.title === t);
+
+  it('flags a generated file deleting 101 lines', () => {
+    const gs = run([mkFile('dist/app.js', del(101))]);
+    expect(find(gs, MECHANICAL_TITLE)).toBeUndefined();
+    const g = find(gs, MECHANICAL_FLAGGED_TITLE)!;
+    expect(g).toMatchObject({ risk: 'medium', autoClear: false });
+    expect(g.riskReasons).toContain('Deletes 101 lines from dist/app.js');
+  });
+
+  it('keeps 100 deleted lines mechanical', () => {
+    const gs = run([mkFile('dist/app.js', del(100))]);
+    expect(find(gs, MECHANICAL_TITLE)).toMatchObject({ autoClear: true, risk: 'low' });
+    expect(find(gs, MECHANICAL_FLAGGED_TITLE)).toBeUndefined();
+  });
+
+  it('sums deletions across a file’s mechanical hunks', () => {
+    const gs = run([mkFile('dist/app.js', [del(60), del(60)])]);
+    expect(find(gs, MECHANICAL_FLAGGED_TITLE)!.hunkIds).toHaveLength(2);
+  });
+
+  it('exempts lockfiles: only the lockfile safeguard applies', () => {
+    const gs = run([
+      mkFile('package.json', ['-"dep": "1"']),
+      mkFile('package-lock.json', del(500)),
+    ]);
+    expect(find(gs, MECHANICAL_TITLE)).toMatchObject({ autoClear: true, risk: 'low' });
+    expect(find(gs, MECHANICAL_FLAGGED_TITLE)).toBeUndefined();
+    const lone = run([mkFile('src/a.ts', ['+x']), mkFile('package-lock.json', del(500))]);
+    expect(find(lone, MECHANICAL_FLAGGED_TITLE)).toBeUndefined();
+    expect(find(lone, LOCKFILE_TITLE)!.riskReasons).toContain(
+      'Lockfile changed without a matching manifest change (package.json)',
+    );
+  });
+});

@@ -4,7 +4,13 @@ import {
   LOCKFILE_INTEGRITY_REASON,
   LOCKFILE_NO_MANIFEST_REASON,
 } from '../classify/lockfile.js';
-import { BUILTIN_RULES, firedRules, ruleMatchesHunk, type RiskRule } from '../risk/rules.js';
+import {
+  BUILTIN_RULES,
+  firedRules,
+  LARGE_DELETION_LINES,
+  ruleMatchesHunk,
+  type RiskRule,
+} from '../risk/rules.js';
 import { maxRisk, type Risk } from '../risk/types.js';
 import { classifyFile } from '../classify/index.js';
 import type { ParsedFile } from '../diff/types.js';
@@ -137,9 +143,23 @@ function finishValidation(
   const rules = opts.rules ?? BUILTIN_RULES;
   const clean: ClassifiedHunk[] = [];
   const risky: { hunk: ClassifiedHunk; risk: Risk; reasons: string[] }[] = [];
+  // firedRules() leaves out assessRisk()'s large-deletion check, so apply it here per file.
+  // Lockfile hunks are exempt: they have their own safeguard (manifest + integrity/version
+  // checks above), and dependency removals routinely delete hundreds of lockfile lines.
+  const deletedByPath = new Map<string, number>();
+  for (const c of hunks) {
+    if (!c.mechanical || flagged.has(c.hunk.id) || c.tags.includes('lockfile')) continue;
+    const n = c.hunk.lines.filter((l) => l.type === 'del').length;
+    deletedByPath.set(c.hunk.path, (deletedByPath.get(c.hunk.path) ?? 0) + n);
+  }
   for (const c of hunks) {
     if (!c.mechanical || flagged.has(c.hunk.id)) continue;
     const f = firedRules(rules, (r) => ruleMatchesHunk(r, c));
+    const deleted = c.tags.includes('lockfile') ? 0 : (deletedByPath.get(c.hunk.path) ?? 0);
+    if (deleted > LARGE_DELETION_LINES) {
+      f.risk = maxRisk(f.risk, 'medium');
+      f.reasons.push(`Deletes ${deleted} lines from ${c.hunk.path}`);
+    }
     if (f.risk === 'low') clean.push(c);
     else risky.push({ hunk: c, ...f });
   }
