@@ -2,10 +2,11 @@ import { useMemo } from 'react';
 import { progressFor } from '../lib/progress';
 import { useReviewState } from '../reviewState';
 
-/** Overall progress: share of the PR's hunks that are reviewed or auto-cleared. */
+/** Overall progress: share of the PR's hunks and hunkless files that are reviewed or auto-cleared. */
 export function ProgressBar() {
-  const { knownHunkIds, status } = useReviewState();
-  const p = useMemo(() => progressFor(knownHunkIds, status), [knownHunkIds, status]);
+  const { knownItemIds, status } = useReviewState();
+  const p = useMemo(() => progressFor(knownItemIds, status), [knownItemIds, status]);
+  const hasFiles = [...knownItemIds].some((id) => id.startsWith('file:'));
   return (
     <div
       className="mt-2 border-t border-gray-200 px-3 pt-2 pb-3 text-xs dark:border-gray-800"
@@ -38,7 +39,8 @@ export function ProgressBar() {
       </div>
       <p className="mt-1 text-gray-500 dark:text-gray-400">
         {p.reviewed} reviewed
-        {p.auto > 0 ? ` + ${p.auto} auto-cleared` : ''} of {p.total} hunks
+        {p.auto > 0 ? ` + ${p.auto} auto-cleared` : ''} of {p.total}{' '}
+        {hasFiles ? 'items' : p.total === 1 ? 'hunk' : 'hunks'}
       </p>
     </div>
   );

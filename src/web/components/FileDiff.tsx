@@ -88,6 +88,11 @@ export function FileDiff({
       ),
     [threads, file.path, shown, hidden],
   );
+  const { fileKeys } = useReviewState();
+  const { hunkId: focusedId } = useFocusedHunk();
+  // A hunkless file is itself the review item: it gets the key as its keyboard-focus id.
+  const fileKey = hunks.length === 0 ? fileKeys.get(file.path) : undefined;
+  const fileFocused = fileKey !== undefined && focusedId === fileKey;
   const githubLink = `${pr.url}/files`;
   const changed = hunks.reduce((n, h) => n + h.lines.length, 0);
 
@@ -125,8 +130,12 @@ export function FileDiff({
   return (
     <section
       id={anchorId}
-      className="scroll-mt-[calc(var(--header-h)+8px)] overflow-hidden rounded-md border border-gray-200 dark:border-gray-800"
+      className={`scroll-mt-[calc(var(--header-h)+8px)] overflow-hidden rounded-md border border-gray-200 dark:border-gray-800 ${
+        fileFocused ? 'ring-2 ring-blue-500' : ''
+      }`}
       data-testid="file-diff"
+      data-hunk-id={fileKey}
+      data-focused={fileFocused ? 'true' : undefined}
       data-path={file.path}
       data-hunk-ids={hunks.map((h) => h.id).join(' ')}
     >
@@ -153,7 +162,11 @@ export function FileDiff({
             {file.status}
           </span>
         )}
-        {hunks.length > 0 && <HunkCheckbox ids={hunks.map((h) => h.id)} label="File reviewed" />}
+        {hunks.length > 0 ? (
+          <HunkCheckbox ids={hunks.map((h) => h.id)} label="File reviewed" />
+        ) : (
+          fileKey && <HunkCheckbox ids={[fileKey]} label="File reviewed" />
+        )}
         <span className="shrink-0 font-mono text-xs">
           <span className="text-green-700 dark:text-green-400">+{file.additions}</span>{' '}
           <span className="text-red-700 dark:text-red-400">−{file.deletions}</span>

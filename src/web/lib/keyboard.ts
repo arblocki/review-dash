@@ -19,9 +19,9 @@ export interface KeyEventLike {
 }
 
 export const SHORTCUTS: { keys: string; action: KeyAction | 'focusing'; label: string }[] = [
-  { keys: 'j / k', action: 'nextHunk', label: 'Next / previous hunk' },
+  { keys: 'j / k', action: 'nextHunk', label: 'Next / previous hunk or file' },
   { keys: 'J / K', action: 'nextGroup', label: 'Next / previous group' },
-  { keys: 'r', action: 'toggleReviewed', label: 'Toggle reviewed on the focused hunk' },
+  { keys: 'r', action: 'toggleReviewed', label: 'Toggle reviewed on the focused hunk or file' },
   { keys: 'c', action: 'comment', label: 'Comment on the focused hunk' },
   { keys: '?', action: 'help', label: 'Show or hide this help' },
   { keys: 'Esc', action: 'escape', label: 'Close dialogs' },

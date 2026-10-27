@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import { AnalysisProvider, useAnalysis } from './analysis';
 import { hideWhitespaceOnly } from './lib/diffModel';
-import { sectionHunkIds } from './lib/reviewFilter';
-import { sectionsFromHunkIds } from './lib/sections';
+import { sectionItemIds } from './lib/reviewFilter';
+import { sectionsForGroup } from './lib/sections';
 import { ReviewStateProvider, useReviewState, useVisibleSections } from './reviewState';
 import { useKeyboardNav } from './useKeyboardNav';
 import { HelpOverlay } from './components/HelpOverlay';
@@ -64,21 +64,25 @@ function Review() {
       view === 'file'
         ? files.map((file) => ({ file, hunks: file.hunks, anchorId: fileAnchorId(file.path) }))
         : group
-          ? sectionsFromHunkIds(files, group.hunkIds)
+          ? sectionsForGroup(files, group)
           : [],
     [view, files, group],
   );
   const visibleNav = useVisibleSections(navSections);
+  const { hideReviewed, reviewed, fileKeys } = useReviewState();
+  // Hunk ids plus the keys of hunkless files, so j/k also stop on those.
   const hunkIds = useMemo(
     () =>
-      sectionHunkIds(
+      sectionItemIds(
         hideWhitespace
-          ? visibleNav.map((s) => ({ ...s, hunks: hideWhitespaceOnly(s.hunks) }))
+          ? visibleNav.map((s) =>
+              s.hunks.length === 0 ? s : { ...s, hunks: hideWhitespaceOnly(s.hunks) },
+            )
           : visibleNav,
+        fileKeys,
       ),
-    [visibleNav, hideWhitespace],
+    [visibleNav, hideWhitespace, fileKeys],
   );
-  const { hideReviewed, reviewed } = useReviewState();
   useKeyboardNav({
     hunkIds,
     groupKeys: view === 'file' ? [] : groups.map((g) => g.key),
@@ -87,11 +91,15 @@ function Review() {
     firstHunkOf: (key) => {
       const g = groups.find((x) => x.key === key);
       if (!g) return null;
-      const secs = sectionsFromHunkIds(files, g.hunkIds).map((s) => ({
-        ...s,
-        hunks: s.hunks.filter((h) => !(hideReviewed && reviewed.has(h.id))),
-      }));
-      return sectionHunkIds(secs)[0] ?? null;
+      const secs = sectionsForGroup(files, g).flatMap((s) => {
+        if (s.hunks.length === 0) {
+          const key = fileKeys.get(s.file.path);
+          return key !== undefined && !(hideReviewed && reviewed.has(key)) ? [s] : [];
+        }
+        const hunks = s.hunks.filter((h) => !(hideReviewed && reviewed.has(h.id)));
+        return hunks.length > 0 ? [{ ...s, hunks }] : [];
+      });
+      return sectionItemIds(secs, fileKeys)[0] ?? null;
     },
     modalOpen: submitting,
     helpOpen,

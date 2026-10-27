@@ -12,6 +12,7 @@ import { useAnalysis } from './analysis';
 import { api, jsonBody } from './api';
 import { parseVerifyId, verifyId } from './lib/groups';
 import { filterSections } from './lib/reviewFilter';
+import { allItemIds, fileKeyMap } from './lib/reviewItems';
 import type { DiffSection } from './lib/sections';
 import { autoClearIds, hunkStatus, type HunkStatus } from './lib/progress';
 import { effectiveHideReviewed, reReviewInfo, type ReReview } from './lib/rereview';
@@ -21,8 +22,10 @@ import type { InterdiffResponse, ReviewStateResponse } from './types';
 export interface ReviewStateValue {
   /** Hunks the user marked reviewed (server-backed). Auto-cleared hunks are not in here. */
   reviewed: ReadonlySet<string>;
-  /** Every hunk id in the PR. */
-  knownHunkIds: ReadonlySet<string>;
+  /** Every review item in the PR: hunk ids plus the keys of hunkless files. */
+  knownItemIds: ReadonlySet<string>;
+  /** path -> review-item key, for files without hunks. */
+  fileKeys: ReadonlyMap<string, string>;
   status(id: string): HunkStatus;
   /** Checks or unchecks one hunk. Checking an auto-cleared hunk stores real reviewed state. */
   toggleHunk(id: string): void;
@@ -99,13 +102,11 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
   const uncheckedRef = useRef(autoUnchecked);
   uncheckedRef.current = autoUnchecked;
 
-  const knownHunkIds = useMemo(
-    () => new Set(files.flatMap((f) => f.hunks.map((h) => h.id))),
-    [files],
-  );
+  const fileKeys = useMemo(() => fileKeyMap(files, pr.headSha), [files, pr.headSha]);
+  const knownItemIds = useMemo(() => allItemIds(files, pr.headSha), [files, pr.headSha]);
   const auto = useMemo(
-    () => (result ? autoClearIds(result.analysis.groups) : new Set<string>()),
-    [result],
+    () => (result ? autoClearIds(result.analysis.groups, fileKeys) : new Set<string>()),
+    [result, fileKeys],
   );
   const autoRef = useRef(auto);
   autoRef.current = auto;
@@ -236,7 +237,8 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
   const value = useMemo<ReviewStateValue>(
     () => ({
       reviewed,
-      knownHunkIds,
+      knownItemIds,
+      fileKeys,
       status,
       toggleHunk,
       setHunks,
@@ -253,7 +255,8 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
     }),
     [
       reviewed,
-      knownHunkIds,
+      knownItemIds,
+      fileKeys,
       status,
       toggleHunk,
       setHunks,
@@ -277,11 +280,24 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/** Sections minus hunks the user marked reviewed, while "Hide reviewed hunks" is on. */
+/**
+ * Sections minus hunks the user marked reviewed, while "Hide reviewed hunks" is on. A hunkless
+ * file section is hidden only when its file key is reviewed.
+ */
 export function useVisibleSections(sections: DiffSection[]): DiffSection[] {
-  const { hideReviewed, reviewed } = useReviewState();
+  const { hideReviewed, reviewed, fileKeys } = useReviewState();
   return useMemo(
-    () => (hideReviewed ? filterSections(sections, (h) => reviewed.has(h.id)) : sections),
-    [sections, hideReviewed, reviewed],
+    () =>
+      hideReviewed
+        ? filterSections(
+            sections,
+            (h) => reviewed.has(h.id),
+            (path) => {
+              const key = fileKeys.get(path);
+              return key !== undefined && reviewed.has(key);
+            },
+          )
+        : sections,
+    [sections, hideReviewed, reviewed, fileKeys],
   );
 }

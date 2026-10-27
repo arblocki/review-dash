@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { groupByKey, isFilesWithoutDiff, verifyId, type GroupNeighbors } from '../lib/groups';
 import { progressFor } from '../lib/progress';
+import { groupItemIds, itemsLabel } from '../lib/reviewItems';
 import { sectionsForGroup } from '../lib/sections';
 import { useReviewState, useVisibleSections } from '../reviewState';
 import { useReview } from '../state';
@@ -37,12 +38,12 @@ export function GroupCard({
 }) {
   const { files, pr } = useReview();
   const [expanded, setExpanded] = useState(!group.autoClear);
-  const { knownHunkIds, status, setHunks } = useReviewState();
+  const { knownItemIds, fileKeys, status, setHunks } = useReviewState();
   const all = useMemo(() => sectionsForGroup(files, group), [files, group]);
   const sections = useVisibleSections(all);
   const ids = useMemo(
-    () => group.hunkIds.filter((id) => knownHunkIds.has(id)),
-    [group, knownHunkIds],
+    () => groupItemIds(group, fileKeys, knownItemIds),
+    [group, fileKeys, knownItemIds],
   );
   const progress = progressFor(ids, status);
   const byKey = useMemo(() => groupByKey(allGroups), [allGroups]);
@@ -88,7 +89,8 @@ export function GroupCard({
                 ✓ {progress.reviewed === 0 ? 'auto-cleared' : 'reviewed'} ·{' '}
               </span>
             ) : null}
-            {progress.done}/{progress.total} {progress.total === 1 ? 'hunk' : 'hunks'} reviewed
+            {progress.done}/{progress.total}{' '}
+            {itemsLabel(progress.total, group.hunkIds.length > 0, group.files.length > 0)} reviewed
             {progress.auto > 0 ? ` (${progress.auto} auto-cleared)` : ''}
           </span>
           {progress.total > 0 && (
@@ -172,8 +174,8 @@ export function GroupCard({
         )}
       </div>
       <div className="mt-4">
-        {shown === 0 && all.length > 0 ? (
-          <AllReviewed count={countHunks(all)} />
+        {shown === 0 && shownFiles === 0 && all.length > 0 ? (
+          <AllReviewed sections={all} />
         ) : expanded ? (
           <>
             {group.autoClear && (

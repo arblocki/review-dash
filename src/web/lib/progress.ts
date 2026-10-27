@@ -1,4 +1,5 @@
 import type { AnalysisGroup } from '../types';
+import { groupItemIds } from './reviewItems';
 
 /**
  * 'reviewed' = the user marked it; 'auto' = in an auto-cleared group and not unchecked (never
@@ -52,27 +53,33 @@ export function hunkStatus(
   return 'none';
 }
 
-/** Ids of every hunk in an auto-clear group (unclassified groups are never auto-cleared). */
-export function autoClearIds(groups: AnalysisGroup[]): Set<string> {
+/**
+ * Ids of every item (hunk or hunkless file key) in an auto-clear group; unclassified groups are
+ * never auto-cleared. Only groups with `autoClear` qualify, so "Files without a diff" and the
+ * flagged-mechanical group stay unchecked.
+ */
+export function autoClearIds(
+  groups: AnalysisGroup[],
+  fileKeys: ReadonlyMap<string, string> = new Map(),
+): Set<string> {
   const out = new Set<string>();
-  for (const g of groups)
-    if (g.autoClear && !g.unclassified) g.hunkIds.forEach((id) => out.add(id));
+  for (const g of groups) {
+    if (!g.autoClear || g.unclassified) continue;
+    g.hunkIds.forEach((id) => out.add(id));
+    for (const p of g.files) {
+      const key = fileKeys.get(p);
+      if (key) out.add(key);
+    }
+  }
   return out;
 }
 
-/** Progress per group, counting only hunks that exist in the PR (`known`). */
+/** Progress per group over its review items (hunks + hunkless files) that exist in the PR. */
 export function groupProgress(
   groups: AnalysisGroup[],
+  fileKeys: ReadonlyMap<string, string>,
   known: ReadonlySet<string>,
   status: (id: string) => HunkStatus,
 ): Map<string, Progress> {
-  return new Map(
-    groups.map((g) => [
-      g.key,
-      progressFor(
-        g.hunkIds.filter((id) => known.has(id)),
-        status,
-      ),
-    ]),
-  );
+  return new Map(groups.map((g) => [g.key, progressFor(groupItemIds(g, fileKeys, known), status)]));
 }

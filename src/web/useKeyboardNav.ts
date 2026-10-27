@@ -5,7 +5,7 @@ import { useFocusedHunk, useReviewState } from './reviewState';
 import { useReview } from './state';
 
 export interface NavOptions {
-  /** Hunks on screen, in display order (reviewed-hidden and whitespace-hidden ones left out). */
+  /** Hunks (and hunkless files, by file key) on screen in display order; hidden ones left out. */
   hunkIds: string[];
   /** Group keys in rail order; empty in By file view, where J/K do nothing. */
   groupKeys: string[];

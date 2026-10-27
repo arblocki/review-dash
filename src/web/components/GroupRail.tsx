@@ -23,10 +23,10 @@ export function GroupRail({
   unrelated: string[];
   loading?: boolean;
 }) {
-  const { knownHunkIds, status } = useReviewState();
+  const { knownItemIds, fileKeys, status } = useReviewState();
   const progress = useMemo(
-    () => groupProgress(groups, knownHunkIds, status),
-    [groups, knownHunkIds, status],
+    () => groupProgress(groups, fileKeys, knownItemIds, status),
+    [groups, fileKeys, knownItemIds, status],
   );
   if (loading && groups.length === 0) {
     return (
@@ -67,7 +67,7 @@ export function GroupRail({
                   data-testid="group-progress"
                   title={
                     p
-                      ? `${p.reviewed} reviewed${p.auto ? `, ${p.auto} auto-cleared` : ''} of ${p.total} hunks`
+                      ? `${p.reviewed} reviewed${p.auto ? `, ${p.auto} auto-cleared` : ''} of ${p.total} ${g.files.length > 0 ? 'hunks + files' : 'hunks'}`
                       : undefined
                   }
                 >
@@ -83,7 +83,7 @@ export function GroupRail({
                       ✓
                     </span>
                   ) : (
-                    `${p?.done ?? 0}/${p?.total ?? g.hunkIds.length}`
+                    `${p?.done ?? 0}/${p?.total ?? g.hunkIds.length + g.files.length}`
                   )}
                 </span>
               </button>
