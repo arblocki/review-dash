@@ -107,11 +107,14 @@ export function spawnCli(opts: SpawnCliOptions): Promise<SpawnCliResult> {
     let timer: NodeJS.Timeout | undefined;
     let graceTimer: NodeJS.Timeout | undefined;
     let hardTimer: NodeJS.Timeout | undefined;
+    let poll: NodeJS.Timeout | undefined;
     let stopping: LlmError | undefined;
+    let leaderExited = false;
 
     const finish = (fn: () => void) => {
       if (settled) return;
       settled = true;
+      clearInterval(poll);
       if (group) liveGroups.delete(group);
       clearTimeout(timer);
       clearTimeout(graceTimer);
@@ -131,7 +134,22 @@ export function spawnCli(opts: SpawnCliOptions): Promise<SpawnCliResult> {
         }
       }
     };
-    // SIGTERM, then SIGKILL after the grace period; reject only once the child is gone.
+    /** Whether any process in the child's group is still running (POSIX only). */
+    const groupAlive = () => {
+      if (!group) return false;
+      try {
+        process.kill(-group, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    // Once stopping, the leader exiting is not enough: a descendant may ignore SIGTERM.
+    // Settle only when the whole group is gone; otherwise the SIGKILL escalation stays armed.
+    const settleIfStopped = () => {
+      if (stopping && leaderExited && !groupAlive()) finish(() => reject(stopping));
+    };
+    // SIGTERM, then SIGKILL after the grace period; reject only once the group is gone.
     const stop = (err: LlmError) => {
       if (settled || stopping) return;
       stopping = err;
@@ -140,6 +158,7 @@ export function spawnCli(opts: SpawnCliOptions): Promise<SpawnCliResult> {
       killTree('SIGTERM');
       graceTimer = setTimeout(() => {
         killTree('SIGKILL');
+        poll = setInterval(settleIfStopped, 25);
         hardTimer = setTimeout(() => finish(() => reject(err)), POST_KILL_WAIT_MS);
       }, killGraceMs);
     };
@@ -154,11 +173,14 @@ export function spawnCli(opts: SpawnCliOptions): Promise<SpawnCliResult> {
     });
     child.on('error', (err) => finish(() => reject(stopping ?? mapSpawnError(command, err))));
     child.on('exit', () => {
-      if (stopping) finish(() => reject(stopping));
+      leaderExited = true;
+      settleIfStopped();
     });
-    child.on('close', (code) =>
-      finish(() => (stopping ? reject(stopping) : resolve({ stdout, stderr, code }))),
-    );
+    child.on('close', (code) => {
+      leaderExited = true;
+      if (stopping) settleIfStopped();
+      else finish(() => resolve({ stdout, stderr, code }));
+    });
 
     signal?.addEventListener('abort', onAbort, { once: true });
     if (Number.isFinite(timeoutMs)) {

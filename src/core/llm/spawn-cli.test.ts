@@ -105,6 +105,42 @@ describe('spawnCli termination', () => {
     await vi.waitFor(() => expect(alive(grandPid)).toBe(false), { timeout: 5000 });
   });
 
+  it.skipIf(process.platform === 'win32')(
+    'SIGKILLs a descendant that ignores SIGTERM even after the leader exits on SIGTERM',
+    async () => {
+      // The leader exits on SIGTERM (default handling); its child, in the same process group,
+      // ignores SIGTERM. The call must not settle until that child is gone too.
+      const stubborn = `process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`;
+      const leader = `
+        const { spawn } = require('node:child_process');
+        const c = spawn(process.execPath, ['-e', ${JSON.stringify(stubborn)}], { stdio: 'ignore' });
+        console.log(c.pid);
+        setInterval(() => {}, 1000);
+      `;
+      let grandPid = 0;
+      const spawnFn: SpawnFn = (cmd, a, o) => {
+        const child = defaultSpawn(cmd, a, o);
+        child.stdout.on('data', (d) => (grandPid ||= Number(String(d).trim())));
+        return child;
+      };
+      const started = Date.now();
+      const run = spawnCli({
+        command: process.execPath,
+        args: ['-e', leader],
+        timeoutMs: 500,
+        killGraceMs: 400,
+        spawnFn,
+      });
+      await expect(run).rejects.toMatchObject({ kind: 'timeout' });
+      expect(grandPid).toBeGreaterThan(0);
+      // Settling waited for the SIGKILL escalation instead of returning when the leader died.
+      expect(Date.now() - started).toBeGreaterThanOrEqual(500 + 400);
+      await vi.waitFor(() => expect(alive(grandPid)).toBe(false), { timeout: 2000 });
+      expect(liveProcessGroups().size).toBe(0);
+    },
+    10_000,
+  );
+
   it('tracks running children and forgets them once they finish', async () => {
     const run = spawnCli({ command: process.execPath, args: ['-e', 'setTimeout(() => {}, 200)'] });
     await vi.waitFor(() => expect(liveProcessGroups().size).toBe(1));
