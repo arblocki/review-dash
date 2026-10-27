@@ -36,6 +36,8 @@ export interface RawFile {
   deletions: number;
   changes?: number;
   patch?: string;
+  /** Blob SHA of the file at the PR head (GitHub's `sha` field). */
+  sha?: string;
 }
 
 export interface ParsedFile {
@@ -48,6 +50,8 @@ export interface ParsedFile {
   patchMissing: boolean;
   /** No patch and no line changes: a binary file (or empty file). */
   binary: boolean;
+  /** Blob SHA at the PR head: identifies a hunkless file's content across pushes. */
+  blobSha?: string;
   hunks: Hunk[];
 }
 

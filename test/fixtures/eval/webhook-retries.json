@@ -1,0 +1,51 @@
+{
+  "name": "webhook-retries",
+  "pr": {
+    "title": "Add retry with backoff to webhook sender",
+    "body": "Retries failed webhook deliveries with exponential backoff. Adds a MAX_RETRIES setting and tests."
+  },
+  "files": [
+    {
+      "filename": "src/webhooks/send.ts",
+      "status": "modified",
+      "additions": 6,
+      "deletions": 1,
+      "patch": "@@ -20,3 +20,8 @@\n export async function send(url: string, body: string) {\n-  return fetch(url, { method: 'POST', body });\n+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {\n+    const res = await fetch(url, { method: 'POST', body });\n+    if (res.ok || res.status < 500) return res;\n+    await sleep(backoffMs(attempt));\n+  }\n+  throw new Error('webhook delivery failed');\n }"
+    },
+    {
+      "filename": "src/webhooks/backoff.ts",
+      "status": "added",
+      "additions": 2,
+      "deletions": 0,
+      "patch": "@@ -1,0 +1,2 @@\n+export const backoffMs = (attempt: number) => Math.min(30_000, 2 ** attempt * 100);\n+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));"
+    },
+    {
+      "filename": "src/webhooks/send.test.ts",
+      "status": "added",
+      "additions": 4,
+      "deletions": 0,
+      "patch": "@@ -1,0 +1,4 @@\n+import { send } from './send';\n+test('retries on 500', async () => {\n+  expect(await send('http://x', '{}')).toBeDefined();\n+});"
+    },
+    {
+      "filename": "src/config.ts",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0,
+      "patch": "@@ -3,2 +3,3 @@\n export const config = {\n+  MAX_RETRIES: Number(process.env.MAX_RETRIES ?? 5),\n };"
+    },
+    {
+      "filename": "README.md",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0,
+      "patch": "@@ -40,0 +40,1 @@\n+Webhook deliveries are retried up to `MAX_RETRIES` times."
+    },
+    {
+      "filename": "pnpm-lock.yaml",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "patch": "@@ -100,1 +100,1 @@\n-  foo: 1.0.0\n+  foo: 1.0.1"
+    }
+  ]
+}

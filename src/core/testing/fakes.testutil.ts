@@ -20,6 +20,8 @@ export interface FakeGitHub extends GitHubClient {
     fetchPr: number;
   };
   setHead(sha: string): void;
+  /** Edits PR metadata (title/body/...) without moving the head. */
+  setMeta(patch: Partial<PrMeta>): void;
   threads: ReviewThread[];
 }
 
@@ -32,6 +34,9 @@ export function fakeGitHub(overrides: Partial<Fixture> = {}): FakeGitHub {
     threads: [],
     setHead(sha) {
       pr.headSha = sha;
+    },
+    setMeta(patch) {
+      Object.assign(pr, patch);
     },
     async fetchPr() {
       fake.calls.fetchPr++;

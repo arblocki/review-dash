@@ -5,6 +5,7 @@ import type { GitHubClient } from '../core/github/types.js';
 import type { PrRef } from '../core/pr-ref.js';
 import { buildReview, ReviewError } from '../core/review.js';
 import type { Store } from '../core/store/index.js';
+import { registerAnalysisApi, type AnalysisDeps } from './analysis.js';
 
 const sideSchema = z.enum(['LEFT', 'RIGHT']);
 
@@ -40,10 +41,12 @@ export interface ApiDeps {
   pr: PrRef;
   github: GitHubClient;
   store: Store;
+  /** Enables /api/analysis and /api/providers. */
+  analysis?: AnalysisDeps;
 }
 
 /** Registers the review API on `app`. Mount behind the token guard. */
-export function registerApi(app: Hono, { pr: ref, github, store }: ApiDeps): void {
+export function registerApi(app: Hono, { pr: ref, github, store, analysis }: ApiDeps): void {
   // PR data is fetched once per server run; ?refresh=1 forces a re-fetch.
   let cached: Promise<PrData> | undefined;
   const getData = (refresh = false): Promise<PrData> => {
@@ -111,6 +114,10 @@ export function registerApi(app: Hono, { pr: ref, github, store }: ApiDeps): voi
       ...(d.incomplete ? { incomplete: d.incomplete } : {}),
     });
   });
+
+  if (analysis) {
+    registerAnalysisApi(app, { pr: ref, github, store, getData: () => getData(), analysis });
+  }
 
   app.get('/api/file', async (c) => {
     const path = c.req.query('path');
