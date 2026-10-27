@@ -6,6 +6,8 @@ import {
   formatDuration,
   groupByKey,
   hunkToGroup,
+  isFilesWithoutDiff,
+  itemCounts,
   orderGroups,
   pickGroup,
   riskBadge,
@@ -22,6 +24,7 @@ const g = (key: string, extra: Partial<AnalysisGroup> = {}): AnalysisGroup => ({
   riskReasons: [],
   verify: [],
   hunkIds: [],
+  files: [],
   dependsOn: [],
   autoClear: false,
   ...extra,
@@ -50,6 +53,34 @@ describe('riskBadge', () => {
     expect(riskBadge(g('x', { risk: 'high', unclassified: true, autoClear: true })).tone).toBe(
       'unclassified',
     );
+  });
+});
+
+describe('riskBadge for mechanical groups', () => {
+  it('uses the risk, not the kind, unless the group is auto-cleared', () => {
+    expect(riskBadge(g('x', { kind: 'mechanical', risk: 'high' }))).toEqual({
+      label: 'HIGH',
+      tone: 'high',
+    });
+    expect(riskBadge(g('x', { kind: 'mechanical', risk: 'medium' })).tone).toBe('medium');
+    expect(riskBadge(g('x', { kind: 'mechanical', risk: 'low', autoClear: true })).tone).toBe(
+      'auto',
+    );
+  });
+});
+
+describe('itemCounts', () => {
+  it('shows hunks, files, or both', () => {
+    expect(itemCounts(g('x', { hunkIds: ['a'] }))).toBe('1 hunk');
+    expect(itemCounts(g('x', { hunkIds: ['a', 'b', 'c'], files: ['p', 'q'] }))).toBe(
+      '3 hunks · 2 files',
+    );
+    expect(itemCounts(g('x', { files: ['p'] }))).toBe('1 file');
+    expect(itemCounts(g('x'))).toBe('0 hunks');
+  });
+  it('detects the files-without-diff group', () => {
+    expect(isFilesWithoutDiff({ title: 'Files without a diff — review on GitHub' })).toBe(true);
+    expect(isFilesWithoutDiff({ title: 'Mechanical changes' })).toBe(false);
   });
 });
 

@@ -97,7 +97,17 @@ export function FileDiff({
       </Placeholder>
     );
   } else if (hunks.length === 0) {
-    body = <Placeholder>No content changes (rename or mode change only).</Placeholder>;
+    body =
+      (file.status === 'renamed' || file.status === 'copied') &&
+      file.oldPath &&
+      file.oldPath !== file.path ? (
+        <Placeholder>
+          {file.status === 'renamed' ? 'Renamed' : 'Copied'} from{' '}
+          <code className="font-mono">{file.oldPath}</code> — no content changes.
+        </Placeholder>
+      ) : (
+        <Placeholder>No content changes (rename or mode change only).</Placeholder>
+      );
   } else if (shown.length === 0) {
     body = <Placeholder>Only whitespace changes (hidden).</Placeholder>;
   } else {

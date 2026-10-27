@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Hunk, ParsedFile } from '../types';
-import { sectionsFromHunkIds } from './sections';
+import { sectionsForGroup, sectionsFromFilePaths, sectionsFromHunkIds } from './sections';
 
 const hunk = (id: string): Hunk => ({
   id,
@@ -36,5 +36,26 @@ describe('sectionsFromHunkIds', () => {
 
   it('returns nothing for unknown ids', () => {
     expect(sectionsFromHunkIds(files, ['zzz'])).toEqual([]);
+  });
+});
+
+describe('sectionsFromFilePaths', () => {
+  const files = [file('a', ['a1']), file('bin', []), file('ren', [])];
+
+  it('makes hunkless sections in file order, skipping unknown paths', () => {
+    const s = sectionsFromFilePaths(files, ['ren', 'nope', 'bin']);
+    expect(s.map((x) => [x.file.path, x.hunks.length])).toEqual([
+      ['bin', 0],
+      ['ren', 0],
+    ]);
+  });
+
+  it('sectionsForGroup lists hunk sections then file sections', () => {
+    const s = sectionsForGroup(files, { hunkIds: ['a1'], files: ['bin', 'ren'] });
+    expect(s.map((x) => [x.file.path, x.hunks.length])).toEqual([
+      ['a', 1],
+      ['bin', 0],
+      ['ren', 0],
+    ]);
   });
 });

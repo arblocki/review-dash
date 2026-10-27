@@ -1,5 +1,14 @@
+import { itemCounts } from '../lib/groups';
 import type { AnalysisGroup } from '../types';
 import { RiskBadge } from './RiskBadge';
+
+/** Compact count: "3", "3 · 2f", or "2f" when the group only has hunkless files. */
+function railCount(g: AnalysisGroup): string {
+  const h = g.hunkIds.length;
+  const f = g.files.length;
+  if (f === 0) return String(h);
+  return h === 0 ? `${f}f` : `${h} · ${f}f`;
+}
 
 /**
  * Left rail for the grouped views: one row per group. The `trailing` cell is where per-group
@@ -41,7 +50,7 @@ export function GroupRail({
             <li key={g.key}>
               <button
                 type="button"
-                title={g.title}
+                title={`${g.title} (${itemCounts(g)})`}
                 aria-current={selected ? 'true' : undefined}
                 onClick={() => onSelect(g.key)}
                 className={`flex w-full items-center gap-2 border-l-2 px-3 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-gray-900 ${
@@ -53,7 +62,7 @@ export function GroupRail({
                   {g.title}
                 </span>
                 <span className="shrink-0 font-mono text-xs text-gray-500 dark:text-gray-400">
-                  {g.hunkIds.length}
+                  {railCount(g)}
                 </span>
               </button>
             </li>

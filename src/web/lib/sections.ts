@@ -18,3 +18,20 @@ export function sectionsFromHunkIds(files: ParsedFile[], hunkIds: Iterable<strin
   }
   return out;
 }
+
+/** Hunkless sections (no diff body) for the given file paths, keeping file order. Unknown paths are skipped. */
+export function sectionsFromFilePaths(files: ParsedFile[], paths: Iterable<string>): DiffSection[] {
+  const wanted = new Set(paths);
+  return files.filter((f) => wanted.has(f.path)).map((file) => ({ file, hunks: [] }));
+}
+
+/** A group's sections: its hunks first, then its hunkless files. */
+export function sectionsForGroup(
+  files: ParsedFile[],
+  group: { hunkIds: string[]; files: string[] },
+): DiffSection[] {
+  return [
+    ...sectionsFromHunkIds(files, group.hunkIds),
+    ...sectionsFromFilePaths(files, group.files),
+  ];
+}

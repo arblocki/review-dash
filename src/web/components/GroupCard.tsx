@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { groupByKey, verifyId } from '../lib/groups';
-import { sectionsFromHunkIds } from '../lib/sections';
+import { groupByKey, isFilesWithoutDiff, itemCounts, verifyId } from '../lib/groups';
+import { sectionsForGroup } from '../lib/sections';
 import { useReview } from '../state';
 import type { AnalysisGroup } from '../types';
 import { HunkList } from './HunkList';
@@ -25,12 +25,13 @@ export function GroupCard({
   onToggleVerify(id: string): void;
   onSelect(key: string): void;
 }) {
-  const { files } = useReview();
+  const { files, pr } = useReview();
   const [expanded, setExpanded] = useState(!group.autoClear);
-  const sections = useMemo(() => sectionsFromHunkIds(files, group.hunkIds), [files, group.hunkIds]);
+  const sections = useMemo(() => sectionsForGroup(files, group), [files, group]);
   const byKey = useMemo(() => groupByKey(allGroups), [allGroups]);
   const deps = group.dependsOn.map((k) => byKey.get(k)).filter((g): g is AnalysisGroup => !!g);
   const shown = sections.reduce((n, s) => n + s.hunks.length, 0);
+  const shownFiles = sections.filter((s) => s.hunks.length === 0).length;
 
   return (
     <article>
@@ -41,9 +42,7 @@ export function GroupCard({
           <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
             {group.kind}
           </span>
-          <span className="text-xs text-gray-500 dark:text-gray-400">
-            {group.hunkIds.length} {group.hunkIds.length === 1 ? 'hunk' : 'hunks'}
-          </span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">{itemCounts(group)}</span>
         </div>
         {group.intent && (
           <p className="mt-2 text-sm">
@@ -86,6 +85,19 @@ export function GroupCard({
             </ul>
           </div>
         )}
+        {isFilesWithoutDiff(group) && (
+          <p className="mt-2 rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            GitHub didn't return a diff for these files — open them on GitHub to review.{' '}
+            <a
+              href={`${pr.url}/files`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-blue-600 hover:underline dark:text-blue-400"
+            >
+              PR files ↗
+            </a>
+          </p>
+        )}
         {deps.length > 0 && (
           <div className="mt-2 flex flex-wrap items-center gap-x-2 text-sm">
             <span className="font-semibold">Read first:</span>
@@ -122,7 +134,13 @@ export function GroupCard({
             className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800"
             onClick={() => setExpanded(true)}
           >
-            Show {shown} {shown === 1 ? 'hunk' : 'hunks'}
+            Show{' '}
+            {[
+              shown > 0 && `${shown} ${shown === 1 ? 'hunk' : 'hunks'}`,
+              shownFiles > 0 && `${shownFiles} ${shownFiles === 1 ? 'file' : 'files'}`,
+            ]
+              .filter(Boolean)
+              .join(' · ') || '0 hunks'}
           </button>
         )}
       </div>

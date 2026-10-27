@@ -1,3 +1,4 @@
+import { FILES_WITHOUT_DIFF_TITLE } from '../../core/group/types';
 import type { Analysis, AnalysisGroup, Hunk } from '../types';
 
 /** Which grouping the main pane shows. 'file' is the M1 all-files view. */
@@ -58,6 +59,21 @@ export function countKnownHunks(group: AnalysisGroup, hunks: Iterable<Hunk>): nu
   const known = new Set<string>();
   for (const h of hunks) known.add(h.id);
   return group.hunkIds.filter((id) => known.has(id)).length;
+}
+
+/** "3 hunks · 2 files", "2 files", or "0 hunks" for an empty group. */
+export function itemCounts(group: Pick<AnalysisGroup, 'hunkIds' | 'files'>): string {
+  const h = group.hunkIds.length;
+  const f = group.files.length;
+  const hunks = `${h} ${h === 1 ? 'hunk' : 'hunks'}`;
+  const files = `${f} ${f === 1 ? 'file' : 'files'}`;
+  if (f === 0) return hunks;
+  return h === 0 ? files : `${hunks} · ${files}`;
+}
+
+/** The "GitHub did not return a diff" group (patch missing / binary files). */
+export function isFilesWithoutDiff(group: Pick<AnalysisGroup, 'title'>): boolean {
+  return group.title === FILES_WITHOUT_DIFF_TITLE;
 }
 
 export function formatDuration(ms: number): string {
