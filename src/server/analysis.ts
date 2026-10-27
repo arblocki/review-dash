@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Hono } from 'hono';
 import { analyzePr, PROMPT_VERSION, type Analysis } from '../core/group/index.js';
 import {
@@ -47,6 +48,16 @@ function status(err: unknown): { status: 400 | 409 | 500 | 504; code: string } {
   return { status: 500, code: 'analysis_failed' };
 }
 
+/** The prompt includes the PR title and body, so editing them must miss the cache. */
+function contextHash(pr: { title: string; body: string }): string {
+  return createHash('sha1')
+    .update(pr.title)
+    .update('\0')
+    .update(pr.body)
+    .digest('hex')
+    .slice(0, 12);
+}
+
 /** GET /api/analysis and GET /api/providers. */
 export function registerAnalysisApi(app: Hono, deps: RouteDeps): void {
   const { pr: ref, github, store, getData, analysis: a } = deps;
@@ -77,7 +88,8 @@ export function registerAnalysisApi(app: Hono, deps: RouteDeps): void {
       const data = await getData();
       const key = {
         headSha: data.pr.headSha,
-        diffHash: data.diffHash,
+        // Folded into the existing key column to avoid a schema migration.
+        diffHash: `${data.diffHash}+${contextHash(data.pr)}`,
         provider: sel.provider,
         model: sel.model,
         promptVersion: PROMPT_VERSION,

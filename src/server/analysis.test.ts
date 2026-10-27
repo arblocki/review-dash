@@ -116,6 +116,27 @@ describe('GET /api/analysis', () => {
     expect(created.at(-1)).toEqual({ provider: 'openrouter', model: 'x/y' });
   });
 
+  it('re-analyzes when the PR title or body changes at the same head', async () => {
+    const { get, github, created } = setup(() => new FakeProvider([reply]));
+    const refresh = async () => {
+      const res = await get('/api/pr?refresh=1');
+      expect(res.status).toBe(200);
+    };
+    expect((await get('/api/analysis')).json.cached).toBe(false);
+    await refresh();
+    expect((await get('/api/analysis')).json.cached).toBe(true);
+
+    github.setMeta({ body: 'A new description' });
+    await refresh();
+    expect((await get('/api/analysis')).json.cached).toBe(false);
+    expect((await get('/api/analysis')).json.cached).toBe(true);
+
+    github.setMeta({ title: 'A new title' });
+    await refresh();
+    expect((await get('/api/analysis')).json.cached).toBe(false);
+    expect(created).toHaveLength(3); // one provider (and one model call) per real analysis
+  });
+
   it('shares one in-flight analysis between concurrent requests', async () => {
     let calls = 0;
     const { get } = setup(
