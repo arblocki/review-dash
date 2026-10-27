@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { LIST_HREF } from '../lib/route';
+import { pullsHref } from '../lib/route';
 import { useDraftCount, useReview } from '../state';
 
 const btn =
@@ -79,7 +79,7 @@ export function Header({ onSubmit, extra }: { onSubmit: () => void; extra?: Reac
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
             <a
-              href={LIST_HREF}
+              href={pullsHref(session.pr)}
               className="shrink-0 text-sm text-blue-600 hover:underline dark:text-blue-400"
               title="All open pull requests"
               onClick={(e) => {
@@ -95,7 +95,7 @@ export function Header({ onSubmit, extra }: { onSubmit: () => void; extra?: Reac
                       confirm(
                         `${unsynced.length} draft comment(s) could not be saved and will be lost. Leave anyway?`,
                       );
-                    if (ok) location.search = LIST_HREF;
+                    if (ok) location.search = pullsHref(session.pr);
                   })
                   .finally(() => setLeaving(false));
               }}

@@ -46,9 +46,11 @@ async function main(): Promise<void> {
   });
   const url = `http://127.0.0.1:${server.port}/#token=${server.token}`;
   console.log(
-    opts.pr === undefined
-      ? `Listing open pull requests in ${formatRepoRef(opts.repo)}`
-      : `Reviewing ${formatPrRef({ ...opts.repo, number: opts.pr })}`,
+    !opts.repo
+      ? 'Listing your repositories'
+      : opts.pr === undefined
+        ? `Listing open pull requests in ${formatRepoRef(opts.repo)}`
+        : `Reviewing ${formatPrRef({ ...opts.repo, number: opts.pr })}`,
   );
   if (opts.open) {
     console.log(`Opening http://127.0.0.1:${server.port}/ (session token not shown)`);

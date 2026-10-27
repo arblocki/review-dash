@@ -20,7 +20,7 @@ const WEB_DIR = resolve(fileURLToPath(import.meta.url), '../../../dist/web');
 
 /** Starts the server on 127.0.0.1. Port 0 picks a random free port. */
 export function startServer(opts: {
-  repo: RepoRef;
+  repo?: RepoRef;
   initialPr?: number;
   port?: number;
   github: GitHubClient;

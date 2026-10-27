@@ -1,24 +1,53 @@
 import { describe, expect, it } from 'vitest';
 import type { PrSummary } from '../types';
-import { filterPrs, relativeTime, routeFromSearch } from './route';
+import { filterPrs, prHref, pullsHref, relativeTime, routeFromSearch } from './route';
 
 describe('routeFromSearch', () => {
-  it('opens ?pr=N', () => {
-    expect(routeFromSearch('?pr=12', 1)).toEqual({ kind: 'pr', number: 12 });
-    expect(routeFromSearch('?pr=12', null)).toEqual({ kind: 'pr', number: 12 });
+  const repo = { owner: 'octocat', repo: 'hello-world' };
+  const none = { repo: null, pr: null };
+  const startPr = { repo, pr: { ...repo, number: 3 } };
+
+  it('opens ?repo=o/r&pr=N', () => {
+    expect(routeFromSearch('?repo=a/b&pr=12', startPr)).toEqual({
+      kind: 'pr',
+      pr: { owner: 'a', repo: 'b', number: 12 },
+    });
   });
 
-  it('shows the list for ?pulls even with an initial PR', () => {
-    expect(routeFromSearch('?pulls', 1)).toEqual({ kind: 'list' });
+  it('lists the PRs of ?repo=o/r', () => {
+    expect(routeFromSearch('?repo=a/b', startPr)).toEqual({
+      kind: 'pulls',
+      repo: { owner: 'a', repo: 'b' },
+    });
   });
 
-  it('falls back to the initial PR, else the list', () => {
-    expect(routeFromSearch('', 3)).toEqual({ kind: 'pr', number: 3 });
-    expect(routeFromSearch('', null)).toEqual({ kind: 'list' });
+  it('shows the repository list for ?repos, whatever the server started with', () => {
+    expect(routeFromSearch('?repos', startPr)).toEqual({ kind: 'repos' });
   });
 
-  it.each(['?pr=0', '?pr=abc', '?pr=-1', '?pr=1.5', '?pr='])('ignores %s', (search) => {
-    expect(routeFromSearch(search, null)).toEqual({ kind: 'list' });
+  it('falls back to the starting PR, then repo, then the repository list', () => {
+    expect(routeFromSearch('', startPr)).toEqual({ kind: 'pr', pr: startPr.pr });
+    expect(routeFromSearch('', { repo, pr: null })).toEqual({ kind: 'pulls', repo });
+    expect(routeFromSearch('', none)).toEqual({ kind: 'repos' });
+  });
+
+  it.each(['?repo=nope', '?repo=a/b/c', '?repo='])('shows the repository list for %s', (q) => {
+    expect(routeFromSearch(q, startPr)).toEqual({ kind: 'repos' });
+  });
+
+  it.each(['?pr=0', '?pr=abc', '?pr=-1', '?pr=1.5', '?pr='])('treats &%s as no PR', (pr) => {
+    expect(routeFromSearch(`?repo=a/b&${pr.slice(1)}`, none)).toEqual({
+      kind: 'pulls',
+      repo: { owner: 'a', repo: 'b' },
+    });
+  });
+
+  it('builds hrefs that round-trip', () => {
+    expect(routeFromSearch(pullsHref(repo), none)).toEqual({ kind: 'pulls', repo });
+    expect(routeFromSearch(prHref(repo, 9), none)).toEqual({
+      kind: 'pr',
+      pr: { ...repo, number: 9 },
+    });
   });
 });
 

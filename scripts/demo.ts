@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFile } from '../src/core/diff/parse.js';
 import type { RawFile } from '../src/core/diff/types.js';
-import type { PrSummary, ReviewThread } from '../src/core/github/types.js';
+import type { PrSummary, RepoSummary, ReviewThread } from '../src/core/github/types.js';
 import { configSchema } from '../src/core/llm/config.js';
 import { FakeProvider } from '../src/core/llm/fake.js';
 import { openStore } from '../src/core/store/index.js';
@@ -155,8 +155,16 @@ function demoGrouping(prompt: string): string {
 }
 
 export async function startDemo(
-  /** `picker` starts on the open-PR list instead of PR #1. */
-  opts: { port?: number; self?: boolean; rereview?: boolean; picker?: boolean } = {},
+  /**
+   * `start` picks the first page: PR #1 (default), the repo's open-PR list, or the repository
+   * list.
+   */
+  opts: {
+    port?: number;
+    self?: boolean;
+    rereview?: boolean;
+    start?: 'pr' | 'pulls' | 'repos';
+  } = {},
 ): Promise<Demo> {
   const fx = loadFixture();
   const contents: Record<string, [string, string]> = {
@@ -280,9 +288,37 @@ export async function startDemo(
     };
   }
 
+  // Every listed repo serves the same open PRs.
+  const repoSummary = (
+    owner: string,
+    name: string,
+    description: string,
+    hoursAgo: number,
+    extra: Partial<RepoSummary> = {},
+  ): RepoSummary => ({
+    owner,
+    name,
+    description,
+    private: false,
+    archived: false,
+    fork: false,
+    url: `https://github.com/${owner}/${name}`,
+    pushedAt: new Date(Date.now() - hoursAgo * 3_600_000).toISOString(),
+    ...extra,
+  });
+  github.repos = [
+    repoSummary('octocat', 'hello-world', 'My first repository on GitHub!', 1),
+    repoSummary('octocat', 'webhooks', 'Webhook delivery service', 30, { private: true }),
+    repoSummary('octocat', 'Spoon-Knife', 'This repo is for demonstration purposes only.', 300, {
+      fork: true,
+    }),
+    repoSummary('octocat', 'legacy-site', 'The old marketing site', 9000, { archived: true }),
+  ];
+
+  const start = opts.start ?? 'pr';
   const server = await startServer({
-    repo: { owner: prRef.owner, repo: prRef.repo },
-    initialPr: opts.picker ? undefined : prRef.number,
+    repo: start === 'repos' ? undefined : { owner: prRef.owner, repo: prRef.repo },
+    initialPr: start === 'pr' ? prRef.number : undefined,
     port: opts.port ?? 0,
     github,
     store,
@@ -317,7 +353,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     port: portIdx >= 0 ? Number(process.argv[portIdx + 1]) : 5175,
     self: process.argv.includes('--self'),
     rereview: process.env.DEMO_REREVIEW === '1',
-    picker: process.argv.includes('--picker'),
+    start: process.argv.includes('--repos')
+      ? 'repos'
+      : process.argv.includes('--picker')
+        ? 'pulls'
+        : 'pr',
   });
   console.log(`Demo (fake GitHub): ${demo.url}`);
   // Smoke tests: `kill -USR2 <pid>` simulates a push; click Refresh in the UI to pick it up.

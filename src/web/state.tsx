@@ -12,7 +12,7 @@ import { api, jsonBody, prUrl } from './api';
 import { sourceLines } from './lib/diffModel';
 import { refreshInOrder } from './lib/refreshOrder';
 import { createDraftSync, type UnsyncedDraft } from './lib/draftSync';
-import { LIST_HREF } from './lib/route';
+import { pullsHref } from './lib/route';
 import type {
   Draft,
   LineRange,
@@ -396,7 +396,10 @@ export function ReviewProvider(props: { session: SessionInfo; children: ReactNod
           >
             Retry
           </button>
-          <a href={LIST_HREF} className="text-sm text-blue-600 hover:underline dark:text-blue-400">
+          <a
+            href={pullsHref(session.pr)}
+            className="text-sm text-blue-600 hover:underline dark:text-blue-400"
+          >
             Open pull requests
           </a>
         </div>

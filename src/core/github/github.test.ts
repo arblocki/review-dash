@@ -58,6 +58,65 @@ describe('github client', () => {
     expect(diffCalls).toHaveLength(1);
   });
 
+  it("lists the viewer's repositories, latest push first", async () => {
+    const calls: { route: string; params?: Record<string, unknown> }[] = [];
+    const rest: RestLike = {
+      async request(route, params) {
+        calls.push({ route, params });
+        return {
+          data: [
+            {
+              name: 'hello-world',
+              owner: { login: 'octocat' },
+              description: 'My first repo',
+              private: true,
+              archived: false,
+              fork: true,
+              html_url: 'https://github.com/octocat/hello-world',
+              pushed_at: '2026-01-02T00:00:00Z',
+            },
+            { name: 'bare', owner: { login: 'o' }, description: null },
+          ],
+        };
+      },
+    };
+    const repos = await createGitHubClient({ rest, gql: noGql }).listRepos();
+    expect(calls).toEqual([
+      {
+        route: 'GET /user/repos',
+        params: {
+          affiliation: 'owner,collaborator,organization_member',
+          sort: 'pushed',
+          direction: 'desc',
+          per_page: 100,
+          page: 1,
+        },
+      },
+    ]);
+    expect(repos).toEqual([
+      {
+        owner: 'octocat',
+        name: 'hello-world',
+        description: 'My first repo',
+        private: true,
+        archived: false,
+        fork: true,
+        url: 'https://github.com/octocat/hello-world',
+        pushedAt: '2026-01-02T00:00:00Z',
+      },
+      {
+        owner: 'o',
+        name: 'bare',
+        description: '',
+        private: false,
+        archived: false,
+        fork: false,
+        url: '',
+        pushedAt: '',
+      },
+    ]);
+  });
+
   it('lists open pull requests, newest update first', async () => {
     const calls: { route: string; params?: Record<string, unknown> }[] = [];
     const rest: RestLike = {

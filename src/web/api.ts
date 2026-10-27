@@ -50,16 +50,21 @@ export class ApiError extends Error {
 }
 
 /** PR the page is reviewing. Fixed for the page's lifetime: switching PRs reloads the page. */
-let prNumber: number | undefined;
+let selected: { owner: string; repo: string; number: number } | undefined;
 
-export function selectPr(number: number): void {
-  prNumber = number;
+export function selectPr(pr: { owner: string; repo: string; number: number }): void {
+  selected = pr;
+}
+
+/** API URL of a repository, e.g. `repoUrl(repo, '/pulls')`. */
+export function repoUrl(repo: { owner: string; repo: string }, path: string): string {
+  return `/api/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}${path}`;
 }
 
 /** URL of a route in the selected PR's API, e.g. `prUrl('/drafts')`. */
 export function prUrl(path: string): string {
-  if (prNumber === undefined) throw new Error('No pull request selected');
-  return `/api/pulls/${prNumber}${path}`;
+  if (!selected) throw new Error('No pull request selected');
+  return repoUrl(selected, `/pulls/${selected.number}${path}`);
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {

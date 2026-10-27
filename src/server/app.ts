@@ -1,17 +1,24 @@
 import { readFileSync } from 'node:fs';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { formatPrRef, formatRepoRef, type PrRef, type RepoRef } from '../core/pr-ref.js';
+import {
+  formatPrRef,
+  formatRepoRef,
+  parseRepoRef,
+  type PrRef,
+  type RepoRef,
+} from '../core/pr-ref.js';
 import type { GitHubClient } from '../core/github/types.js';
 import type { Store } from '../core/store/index.js';
 import type { AnalysisDeps } from './analysis.js';
-import { registerApi } from './api.js';
+import { registerApi, upstreamError } from './api.js';
 import { hostGuard, tokenGuard } from './security.js';
 
 export interface AppOptions {
   token: string;
-  repo: RepoRef;
-  /** PR the UI opens first; without one it starts on the open-PR list. */
+  /** Repository the UI opens on; without one it starts on the repository list. */
+  repo?: RepoRef;
+  /** PR in `repo` the UI opens first; without one it starts on the repo's open-PR list. */
   initialPr?: number;
   github: GitHubClient;
   store: Store;
@@ -30,57 +37,58 @@ export function createApp(opts: AppOptions): Hono {
 
   app.get('/api/health', (c) => c.json({ ok: true }));
   app.get('/api/session', (c) => {
+    const repo = opts.repo ?? null;
     const pr: PrRef | null =
-      opts.initialPr === undefined ? null : { ...opts.repo, number: opts.initialPr };
+      repo && opts.initialPr !== undefined ? { ...repo, number: opts.initialPr } : null;
     return c.json({
-      repo: opts.repo,
+      repo,
       pr,
-      label: pr ? formatPrRef(pr) : formatRepoRef(opts.repo),
+      label: pr ? formatPrRef(pr) : repo ? formatRepoRef(repo) : 'review-dash',
     });
   });
-  app.get('/api/pulls', async (c) => {
-    try {
-      return c.json({ pulls: await opts.github.listOpenPrs(opts.repo) });
-    } catch (err) {
-      const status = (err as { status?: unknown }).status;
-      return c.json(
-        {
-          error: (err as Error).message,
-          ...(typeof status === 'number' ? { upstreamStatus: status } : {}),
-        },
-        502,
-      );
-    }
+  app.get('/api/repos', async (c) => c.json({ repos: await opts.github.listRepos() }));
+
+  // Repository routes; `:owner/:repo` must be a valid GitHub name pair.
+  const repoOf = (c: { req: { param(name: string): string } }): RepoRef | null =>
+    parseRepoRef(`${c.req.param('owner')}/${c.req.param('repo')}`);
+  app.get('/api/repos/:owner/:repo/pulls', async (c) => {
+    const repo = repoOf(c);
+    if (!repo) return c.json({ error: 'invalid repository' }, 400);
+    return c.json({ pulls: await opts.github.listOpenPrs(repo) });
   });
 
   // Each PR gets its own sub-app (with its own PR-data and analysis caches), created on first
-  // use. `/api/pulls/:number/<route>` is served by that app's `/api/<route>`.
-  const prApps = new Map<number, Hono>();
-  const prApp = (number: number): Hono => {
-    let sub = prApps.get(number);
+  // use. `/api/repos/:owner/:repo/pulls/:number/<route>` is served by that app's `/api/<route>`.
+  const prApps = new Map<string, Hono>();
+  const prApp = (pr: PrRef): Hono => {
+    const key = formatPrRef(pr);
+    let sub = prApps.get(key);
     if (!sub) {
       sub = new Hono();
       registerApi(sub, {
-        pr: { ...opts.repo, number },
+        pr,
         github: opts.github,
         store: opts.store,
         analysis: opts.analysis,
       });
       sub.all('/api/*', (c) => c.json({ error: 'not found' }, 404));
-      prApps.set(number, sub);
+      prApps.set(key, sub);
     }
     return sub;
   };
-  app.all('/api/pulls/:number/*', (c) => {
+  app.all('/api/repos/:owner/:repo/pulls/:number/*', (c) => {
+    const repo = repoOf(c);
+    if (!repo) return c.json({ error: 'invalid repository' }, 400);
     const raw = c.req.param('number');
     const number = Number(raw);
     if (!/^\d+$/.test(raw) || !Number.isSafeInteger(number) || number < 1) {
       return c.json({ error: 'invalid pull request number' }, 400);
     }
     const url = new URL(c.req.url);
-    url.pathname = url.pathname.replace(/^\/api\/pulls\/\d+/, '/api');
-    return prApp(number).fetch(new Request(url, c.req.raw));
+    url.pathname = url.pathname.replace(/^\/api\/repos\/[^/]+\/[^/]+\/pulls\/\d+/, '/api');
+    return prApp({ ...repo, number }).fetch(new Request(url, c.req.raw));
   });
+  app.onError((err, c) => c.json(upstreamError(err), 502));
   app.all('/api/*', (c) => c.json({ error: 'not found' }, 404));
 
   const { webDir } = opts;

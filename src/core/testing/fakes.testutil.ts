@@ -5,6 +5,7 @@ import type {
   GitHubClient,
   PrMeta,
   PrSummary,
+  RepoSummary,
   ReviewThread,
   SubmitReviewInput,
 } from '../github/types.js';
@@ -39,6 +40,8 @@ export interface FakeGitHub extends GitHubClient {
   threads: ReviewThread[];
   /** What listOpenPrs returns. */
   openPrs: PrSummary[];
+  /** What listRepos returns. */
+  repos: RepoSummary[];
 }
 
 /** In-memory GitHubClient backed by the fixture. */
@@ -49,11 +52,15 @@ export function fakeGitHub(overrides: Partial<Fixture> = {}): FakeGitHub {
     calls: { submitReview: [], replies: [], fetchPr: 0, compare: [] },
     threads: [],
     openPrs: [],
+    repos: [],
     contents: {},
     contentsAt: {},
     compare: { commits: [], files: [], totalCommits: 0 },
     setHead(sha) {
       pr.headSha = sha;
+    },
+    async listRepos() {
+      return fake.repos;
     },
     async listOpenPrs() {
       return fake.openPrs;

@@ -3,7 +3,8 @@ import { isProviderId, PROVIDER_IDS, type ProviderId } from '../core/llm/types.j
 import { parsePrRef, parseRepoRef, type RepoRef } from '../core/pr-ref.js';
 
 export interface CliOptions {
-  repo: RepoRef;
+  /** Omitted when started with no argument (the UI lists the viewer's repositories). */
+  repo?: RepoRef;
   /** PR to open first; omitted when started with just a repo (the UI lists open PRs). */
   pr?: number;
   provider?: ProviderId;
@@ -15,10 +16,11 @@ export interface CliOptions {
   trustPrConfig: boolean;
 }
 
-export const USAGE = `Usage: review-dash <owner/repo#123 | https://github.com/owner/repo/pull/123> [options]
-       review-dash <owner/repo | https://github.com/owner/repo> [options]
+export const USAGE = `Usage: review-dash [owner/repo#123 | https://github.com/owner/repo/pull/123] [options]
+       review-dash [owner/repo | https://github.com/owner/repo] [options]
 
-With only a repository, the UI lists its open pull requests to choose from.
+With only a repository, the UI lists its open pull requests to choose from. With no
+argument, it starts on a list of your repositories.
 
 Options:
   --provider <name>  LLM provider: claude-cli | codex-cli | openrouter
@@ -54,13 +56,19 @@ export function parseCli(argv: string[]): CliOptions | 'help' {
   const { values, positionals } = parsed;
   if (values.help) return 'help';
 
-  if (positionals.length !== 1) {
-    throw new UsageError('Expected exactly one PR or repository reference.');
+  if (positionals.length > 1) {
+    throw new UsageError('Expected at most one PR or repository reference.');
   }
-  const arg = positionals[0]!;
-  const pr = parsePrRef(arg);
-  const repo = pr ? { owner: pr.owner, repo: pr.repo } : parseRepoRef(arg);
-  if (!repo) throw new UsageError(`Invalid PR or repository reference: ${arg}`);
+  const arg = positionals[0];
+  const pr = arg === undefined ? null : parsePrRef(arg);
+  const repo = pr
+    ? { owner: pr.owner, repo: pr.repo }
+    : arg === undefined
+      ? null
+      : parseRepoRef(arg);
+  if (arg !== undefined && !repo) {
+    throw new UsageError(`Invalid PR or repository reference: ${arg}`);
+  }
 
   let port: number | undefined;
   if (values.port !== undefined) {
@@ -77,7 +85,7 @@ export function parseCli(argv: string[]): CliOptions | 'help' {
   }
 
   return {
-    repo,
+    ...(repo ? { repo } : {}),
     ...(pr ? { pr: pr.number } : {}),
     provider: values.provider as ProviderId | undefined,
     model: values.model,

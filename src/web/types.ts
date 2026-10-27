@@ -5,6 +5,7 @@ export type { Hunk, DiffLine, ParsedFile, Side, LineRange } from '../core/diff/t
 export type {
   PrMeta,
   PrSummary,
+  RepoSummary,
   ReviewThread,
   ThreadComment,
   ReviewEvent,
@@ -17,10 +18,10 @@ export interface SessionInfo {
   pr: { owner: string; repo: string; number: number };
 }
 
-/** GET /api/session: the repository, and the PR to open first (null = start on the list). */
+/** GET /api/session: the repository and PR the server was started with, if any. */
 export interface AppSession {
   label: string;
-  repo: { owner: string; repo: string };
+  repo: { owner: string; repo: string } | null;
   pr: { owner: string; repo: string; number: number } | null;
 }
 

@@ -16,6 +16,18 @@ export interface PrMeta {
   changedFiles: number;
 }
 
+/** A repository the viewer can access. */
+export interface RepoSummary {
+  owner: string;
+  name: string;
+  description: string;
+  private: boolean;
+  archived: boolean;
+  fork: boolean;
+  url: string;
+  pushedAt: string;
+}
+
 /** One row of a repository's open pull request list. */
 export interface PrSummary {
   number: number;
@@ -97,6 +109,8 @@ export interface SubmittedReview {
 
 /** Everything the app needs from GitHub. Implemented by the Octokit client; faked in tests. */
 export interface GitHubClient {
+  /** Repositories the viewer owns, collaborates on, or can see through an org; latest push first. */
+  listRepos(): Promise<RepoSummary[]>;
   /** Open pull requests, most recently updated first (capped). */
   listOpenPrs(repo: RepoRef): Promise<PrSummary[]>;
   fetchPr(ref: PrRef): Promise<PrMeta>;

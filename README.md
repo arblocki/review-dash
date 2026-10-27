@@ -21,13 +21,23 @@ pnpm build
 pnpm start owner/repo#123
 pnpm start https://github.com/owner/repo/pull/123 --port 8080 --no-open
 pnpm start owner/repo          # or https://github.com/owner/repo
+pnpm start                     # pick a repository first
 ```
 
-Given just a repository, the UI opens on its open pull requests (most recently updated first,
-up to 500). Filter by number, title, author, branch or label, then click one or use ↑/↓ and
-Enter. `← PRs` in the review header goes back to the list (pending drafts are saved first).
-The address bar tracks the choice: `?pr=123` opens a PR, `?pulls` the list. Started with a PR,
-the UI opens that PR and the list is still one click away.
+The UI has three levels, and the argument picks which one it opens on:
+
+- **Repositories** (no argument): repos you own, collaborate on, or see through an org, most
+  recently pushed first (up to 500), with the ones you opened recently in this browser on top.
+  Type any `owner/repo` or GitHub URL to open a repo that isn't listed, such as a public one.
+- **Open pull requests** (`owner/repo`): most recently updated first (up to 500). Filter by
+  number, title, author, branch or label. Type a number that isn't open to open it anyway.
+  `← Repos` goes back to the repository list.
+- **Review** (`owner/repo#123`): `← PRs` in the header goes back to the list, saving pending
+  drafts first.
+
+In both lists you can click, or use ↑/↓ and Enter. The address bar tracks where you are
+(`?repos`, `?repo=owner/repo`, `?repo=owner/repo&pr=123`), so you can switch to any repo or
+PR without restarting the server.
 
 By default the browser is opened for you. With `--no-open` the full URL is printed. It
 contains a session token (`#token=...`), so don't share or log it. When the browser is
@@ -53,7 +63,8 @@ Per-repo risk rules go in `.review-dash.yaml` at the repo root (see
 header switcher, or the config file (see `docs/PLAN.md` section 5.4).
 
 To try the UI without a token, run `pnpm build && pnpm demo` (add `DEMO_REREVIEW=1` for the
-re-review banner, or `--picker` to start on the open-PR list).
+re-review banner, `--picker` to start on the open-PR list, or `--repos` to start on the
+repository list).
 
 ## Authentication
 

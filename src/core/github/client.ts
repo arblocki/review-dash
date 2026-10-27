@@ -8,6 +8,7 @@ import type {
   PrCommit,
   PrMeta,
   PrSummary,
+  RepoSummary,
   RestLike,
   ReviewThread,
   ThreadComment,
@@ -20,6 +21,7 @@ export const MAX_COMPARE_COMMITS = 1000;
 /** The compare endpoint returns at most this many files and does not paginate them. */
 export const COMPARE_FILE_LIMIT = 300;
 const MAX_OPEN_PRS = 500;
+const MAX_REPOS = 500;
 const DIFF_ACCEPT = 'application/vnd.github.diff';
 
 // Loosely typed API payloads; every field is read defensively.
@@ -100,6 +102,28 @@ export function createGitHubClient(deps: { rest: RestLike; gql: GraphqlLike }): 
   }
 
   return {
+    async listRepos() {
+      const raw = await paginate(
+        'GET /user/repos',
+        {
+          affiliation: 'owner,collaborator,organization_member',
+          sort: 'pushed',
+          direction: 'desc',
+        },
+        MAX_REPOS,
+      );
+      return raw.map((r): RepoSummary => ({
+        owner: r.owner?.login ?? '',
+        name: r.name ?? '',
+        description: r.description ?? '',
+        private: !!r.private,
+        archived: !!r.archived,
+        fork: !!r.fork,
+        url: r.html_url ?? '',
+        pushedAt: r.pushed_at ?? '',
+      }));
+    },
+
     async listOpenPrs(repo) {
       const raw = await paginate(
         'GET /repos/{owner}/{repo}/pulls',

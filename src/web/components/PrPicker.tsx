@@ -1,66 +1,45 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../api';
-import { filterPrs, prHref, relativeTime } from '../lib/route';
-import type { AppSession, PrSummary } from '../types';
-
-const btn =
-  'rounded border border-gray-300 bg-white px-2.5 py-1 text-sm hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { api, repoUrl } from '../api';
+import { rememberRepo } from '../lib/recentRepos';
+import { filterPrs, prHref, relativeTime, REPOS_HREF } from '../lib/route';
+import type { PrSummary, RepoRef } from '../types';
+import { useListNav } from '../useListNav';
+import { useLoader } from '../useLoader';
+import { listClass, PickerShell, rowClass } from './PickerShell';
 
 /** The repository's open pull requests; picking one opens its review. */
-export function PrPicker({ session }: { session: AppSession }) {
-  const [pulls, setPulls] = useState<PrSummary[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+export function PrPicker({ repo }: { repo: RepoRef }) {
+  const fetcher = useCallback(
+    () => api<{ pulls: PrSummary[] }>(repoUrl(repo, '/pulls')).then((r) => r.pulls),
+    [repo],
+  );
+  const { data: pulls, error, loading, reload } = useLoader(fetcher);
   const [query, setQuery] = useState('');
-  const [active, setActive] = useState(0);
-  const listRef = useRef<HTMLUListElement>(null);
-  const repoLabel = `${session.repo.owner}/${session.repo.repo}`;
+  const repoLabel = `${repo.owner}/${repo.repo}`;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setPulls((await api<{ pulls: PrSummary[] }>('/api/pulls')).pulls);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
+  // Only repos that actually load go on the recent list.
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (pulls) rememberRepo(repo);
+  }, [pulls, repo]);
 
   const shown = useMemo(() => filterPrs(pulls ?? [], query), [pulls, query]);
-  const current = Math.min(active, Math.max(shown.length - 1, 0));
   // A number that matches nothing open (e.g. a closed PR) can still be opened directly.
   const typedNumber = /^\s*#?(\d+)\s*$/.exec(query)?.[1];
-
-  useEffect(() => {
-    listRef.current
-      ?.querySelector(`[data-index="${current}"]`)
-      ?.scrollIntoView({ block: 'nearest' });
-  }, [current]);
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setActive(Math.min(current + 1, shown.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setActive(Math.max(current - 1, 0));
-    } else if (e.key === 'Enter') {
-      const pick = shown[current];
-      if (pick) location.search = prHref(pick.number);
-      else if (typedNumber) location.search = prHref(Number(typedNumber));
-    }
-  };
+  const { current, setActive, listRef, onKeyDown } = useListNav(shown.length, (i) => {
+    const pick = i === null ? undefined : shown[i];
+    if (pick) location.search = prHref(repo, pick.number);
+    else if (typedNumber) location.search = prHref(repo, Number(typedNumber));
+  });
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6">
-      <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h1 className="text-lg font-semibold">Open pull requests</h1>
+    <PickerShell
+      title="Open pull requests"
+      back={
+        <a href={REPOS_HREF} className="text-sm text-blue-600 hover:underline dark:text-blue-400">
+          ← Repos
+        </a>
+      }
+      subtitle={
         <a
           href={`https://github.com/${repoLabel}/pulls`}
           target="_blank"
@@ -69,35 +48,19 @@ export function PrPicker({ session }: { session: AppSession }) {
         >
           {repoLabel} ↗
         </a>
-        <span className="flex-1" />
-        <button type="button" className={btn} disabled={loading} onClick={() => void load()}>
-          {loading ? 'Loading…' : 'Refresh'}
-        </button>
-      </div>
-
-      <input
-        type="search"
-        autoFocus
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setActive(0);
-        }}
-        onKeyDown={onKeyDown}
-        placeholder="Filter by number, title, author, branch or label — ↑/↓ to move, Enter to open"
-        aria-label="Filter pull requests"
-        className="mb-3 w-full rounded border border-gray-300 bg-white px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900"
-      />
-
-      {error && (
-        <p
-          role="alert"
-          className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200"
-        >
-          Could not list pull requests: {error}
-        </p>
-      )}
-
+      }
+      loading={loading}
+      onRefresh={() => void reload()}
+      query={query}
+      onQuery={(q) => {
+        setQuery(q);
+        setActive(0);
+      }}
+      onKeyDown={onKeyDown}
+      placeholder="Filter by number, title, author, branch or label — ↑/↓ to move, Enter to open"
+      filterLabel="Filter pull requests"
+      error={error && `Could not list pull requests: ${error}`}
+    >
       {pulls === null && !error && (
         <p className="text-sm text-gray-500 dark:text-gray-400">Loading pull requests…</p>
       )}
@@ -109,7 +72,7 @@ export function PrPicker({ session }: { session: AppSession }) {
             <>
               {' '}
               <a
-                href={prHref(Number(typedNumber))}
+                href={prHref(repo, Number(typedNumber))}
                 className="text-blue-600 hover:underline dark:text-blue-400"
               >
                 Open #{typedNumber} anyway
@@ -120,22 +83,14 @@ export function PrPicker({ session }: { session: AppSession }) {
       )}
 
       {shown.length > 0 && (
-        <ul
-          ref={listRef}
-          className="divide-y divide-gray-200 rounded border border-gray-200 dark:divide-gray-800 dark:border-gray-800"
-          aria-label="Open pull requests"
-        >
+        <ul ref={listRef} className={listClass} aria-label="Open pull requests">
           {shown.map((p, i) => (
             <li key={p.number} data-index={i}>
               <a
-                href={prHref(p.number)}
+                href={prHref(repo, p.number)}
                 aria-current={i === current ? 'true' : undefined}
                 onMouseEnter={() => setActive(i)}
-                className={`block px-3 py-2 ${
-                  i === current
-                    ? 'bg-blue-50 dark:bg-blue-950/50'
-                    : 'hover:bg-gray-50 dark:hover:bg-gray-900'
-                }`}
+                className={rowClass(i === current)}
               >
                 <div className="flex items-baseline gap-2">
                   <span className="shrink-0 font-mono text-sm text-gray-500 dark:text-gray-400">
@@ -178,6 +133,6 @@ export function PrPicker({ session }: { session: AppSession }) {
           Showing the 500 most recently updated open pull requests.
         </p>
       )}
-    </div>
+    </PickerShell>
   );
 }

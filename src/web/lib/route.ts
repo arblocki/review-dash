@@ -1,28 +1,42 @@
-import type { PrSummary } from '../types';
+import { parsePrRef, parseRepoRef } from '../../core/pr-ref';
+import type { PrRef, PrSummary, RepoRef } from '../types';
 
-/** Which page to show: one PR's review, or the repository's open-PR list. */
-export type Route = { kind: 'pr'; number: number } | { kind: 'list' };
+/** Which page to show: the repository list, one repo's open PRs, or one PR's review. */
+export type Route =
+  { kind: 'repos' } | { kind: 'pulls'; repo: RepoRef } | { kind: 'pr'; pr: PrRef };
 
 /**
- * Reads the route from the query string: `?pr=12` opens PR 12 and `?pulls` the list. With
- * neither, the PR the server was started with opens, else the list.
+ * Reads the route from the query string: `?repos` is the repository list, `?repo=o/r` that
+ * repo's open PRs, and `?repo=o/r&pr=12` PR 12. With no query, the PR or repo the server was
+ * started with opens, else the repository list. An invalid `repo` shows the repository list.
  */
-export function routeFromSearch(search: string, initialPr: number | null): Route {
+export function routeFromSearch(
+  search: string,
+  start: { repo: RepoRef | null; pr: PrRef | null },
+): Route {
   const params = new URLSearchParams(search);
-  const raw = params.get('pr');
-  if (raw !== null && /^\d+$/.test(raw)) {
-    const number = Number(raw);
-    if (Number.isSafeInteger(number) && number > 0) return { kind: 'pr', number };
+  if (params.has('repos')) return { kind: 'repos' };
+  const rawRepo = params.get('repo');
+  if (rawRepo === null) {
+    if (start.pr) return { kind: 'pr', pr: start.pr };
+    return start.repo ? { kind: 'pulls', repo: start.repo } : { kind: 'repos' };
   }
-  if (params.has('pulls') || initialPr === null) return { kind: 'list' };
-  return { kind: 'pr', number: initialPr };
+  const repo = parseRepoRef(rawRepo);
+  if (!repo) return { kind: 'repos' };
+  const pr = parsePrRef(`${repo.owner}/${repo.repo}#${params.get('pr') ?? ''}`);
+  return pr ? { kind: 'pr', pr } : { kind: 'pulls', repo };
 }
 
-export function prHref(number: number): string {
-  return `?pr=${number}`;
+// Owner and repo names are [A-Za-z0-9_.-], so they need no escaping.
+export function pullsHref({ owner, repo }: RepoRef): string {
+  return `?repo=${owner}/${repo}`;
 }
 
-export const LIST_HREF = '?pulls';
+export function prHref(repo: RepoRef, number: number): string {
+  return `${pullsHref(repo)}&pr=${number}`;
+}
+
+export const REPOS_HREF = '?repos';
 
 /**
  * Filters the open-PR list by free text. Every whitespace-separated term must match: a number

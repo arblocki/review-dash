@@ -29,6 +29,7 @@ import { groupNeighbors, orderGroups, pickGroup, resolveView, type ViewMode } fr
 import { mainPaneState } from './lib/mainPane';
 import { fileThreadOwners } from './lib/sections';
 import { PrPicker } from './components/PrPicker';
+import { RepoPicker } from './components/RepoPicker';
 import { routeFromSearch } from './lib/route';
 import { ReviewProvider, useReview } from './state';
 import type { AppSession } from './types';
@@ -226,8 +227,8 @@ function Review() {
 }
 
 /**
- * Shows the open-PR list or one PR's review, picked from the URL (see routeFromSearch).
- * Moving between them is a page load, so no state carries over from one PR to another.
+ * Shows the repository list, a repo's open PRs, or one PR's review, picked from the URL (see
+ * routeFromSearch). Moving between them is a page load, so no state carries over between PRs.
  */
 export function App() {
   const [session, setSession] = useState<AppSession | null>(null);
@@ -255,11 +256,12 @@ export function App() {
   }
   if (!session) return <p className="p-8 text-gray-500 dark:text-gray-400">Loading…</p>;
 
-  const route = routeFromSearch(location.search, session.pr?.number ?? null);
-  if (route.kind === 'list') return <PrPicker session={session} />;
+  const route = routeFromSearch(location.search, session);
+  if (route.kind === 'repos') return <RepoPicker />;
+  if (route.kind === 'pulls') return <PrPicker repo={route.repo} />;
 
-  selectPr(route.number);
-  const pr = { ...session.repo, number: route.number };
+  const { pr } = route;
+  selectPr(pr);
   return (
     <ReviewProvider session={{ pr, label: `${pr.owner}/${pr.repo}#${pr.number}` }}>
       <AnalysisProvider>

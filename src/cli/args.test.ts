@@ -47,12 +47,18 @@ describe('parseCli', () => {
     },
   );
 
+  it('starts without a repository when given no argument', () => {
+    const opts = parseCli(['--no-open']);
+    expect(opts).toMatchObject({ open: false });
+    expect(opts).not.toHaveProperty('repo');
+    expect(opts).not.toHaveProperty('pr');
+  });
+
   it('returns help', () => {
     expect(parseCli(['--help'])).toBe('help');
   });
 
   it.each([
-    [[]],
     [['nope']],
     [['a/b', 'c/d']],
     [['a/b#1', '--port', 'x']],
