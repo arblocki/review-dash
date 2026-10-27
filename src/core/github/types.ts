@@ -48,6 +48,12 @@ export interface PrCommit {
 export interface CompareResult {
   commits: PrCommit[];
   files: string[];
+  /** Commits between the two, as GitHub counts them (may exceed `commits.length`). */
+  totalCommits: number;
+  /** `commits` is capped (see MAX_COMPARE_COMMITS) and does not list them all. */
+  commitsTruncated?: boolean;
+  /** The file list hit GitHub's 300-file limit for this endpoint, so it may be incomplete. */
+  filesTruncated?: boolean;
 }
 
 export type ReviewEvent = 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';

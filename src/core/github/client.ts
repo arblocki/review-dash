@@ -14,6 +14,10 @@ import type {
 
 const PER_PAGE = 100;
 const MAX_FILES = 3000;
+/** Commits listed for an interdiff; more than this is reported as truncated. */
+export const MAX_COMPARE_COMMITS = 1000;
+/** The compare endpoint returns at most this many files and does not paginate them. */
+export const COMPARE_FILE_LIMIT = 300;
 const DIFF_ACCEPT = 'application/vnd.github.diff';
 
 // Loosely typed API payloads; every field is read defensively.
@@ -234,21 +238,47 @@ export function createGitHubClient(deps: { rest: RestLike; gql: GraphqlLike }): 
 
     async compareCommits(ref, base, head) {
       try {
-        const { data } = await rest.request('GET /repos/{owner}/{repo}/compare/{basehead}', {
-          owner: ref.owner,
-          repo: ref.repo,
-          basehead: `${base}...${head}`,
-          per_page: PER_PAGE,
-        });
-        const d = data as Json;
+        const commits: PrCommit[] = [];
+        let files: string[] = [];
+        let total = 0;
+        for (let page = 1; ; page++) {
+          const { data } = await rest.request('GET /repos/{owner}/{repo}/compare/{basehead}', {
+            owner: ref.owner,
+            repo: ref.repo,
+            basehead: `${base}...${head}`,
+            per_page: PER_PAGE,
+            page,
+          });
+          const d = data as Json;
+          const pageCommits = (d.commits ?? []) as Json[];
+          if (page === 1) {
+            // Files are only returned (in full) on the first page.
+            files = ((d.files ?? []) as Json[]).map((f) => f.filename as string);
+            total = typeof d.total_commits === 'number' ? d.total_commits : pageCommits.length;
+          }
+          for (const c of pageCommits) {
+            commits.push({
+              sha: c.sha,
+              message: c.commit?.message ?? '',
+              author: c.author?.login ?? c.commit?.author?.name ?? null,
+              date: c.commit?.author?.date ?? null,
+            });
+          }
+          if (
+            pageCommits.length < PER_PAGE ||
+            commits.length >= total ||
+            commits.length >= MAX_COMPARE_COMMITS
+          ) {
+            break;
+          }
+        }
+        const capped = commits.slice(0, MAX_COMPARE_COMMITS);
         return {
-          commits: ((d.commits ?? []) as Json[]).map((c): PrCommit => ({
-            sha: c.sha,
-            message: c.commit?.message ?? '',
-            author: c.author?.login ?? c.commit?.author?.name ?? null,
-            date: c.commit?.author?.date ?? null,
-          })),
-          files: ((d.files ?? []) as Json[]).map((f) => f.filename as string),
+          commits: capped,
+          files,
+          totalCommits: Math.max(total, capped.length),
+          ...(total > capped.length ? { commitsTruncated: true } : {}),
+          ...(files.length >= COMPARE_FILE_LIMIT ? { filesTruncated: true } : {}),
         };
       } catch (err) {
         const status = (err as { status?: unknown }).status;

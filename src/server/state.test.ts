@@ -221,6 +221,7 @@ describe('GET /api/interdiff', () => {
     github.compare = {
       commits: [{ sha: 'c1', message: 'fix', author: 'octocat', date: '2026-01-02T00:00:00Z' }],
       files: ['src/greet.ts'],
+      totalCommits: 1,
     };
     const r = await call('GET', '/api/interdiff');
     expect(github.calls.compare).toEqual([{ base: 'old-head', head: HEAD }]);
@@ -231,6 +232,27 @@ describe('GET /api/interdiff', () => {
       changedFiles: ['src/greet.ts'],
       newHunkIds: hunkIds.slice(1),
       compareAvailable: true,
+      totalCommits: 1,
+      commitsTruncated: false,
+      filesTruncated: false,
+    });
+  });
+
+  it('surfaces truncation flags from the compare', async () => {
+    const { call, github, store } = setup();
+    store.markReviewed(pr, [hunkIds[0]!], 'old-head');
+    github.compare = {
+      commits: [],
+      files: [],
+      totalCommits: 2500,
+      commitsTruncated: true,
+      filesTruncated: true,
+    };
+    const r = await call('GET', '/api/interdiff');
+    expect(r.json).toMatchObject({
+      totalCommits: 2500,
+      commitsTruncated: true,
+      filesTruncated: true,
     });
   });
 

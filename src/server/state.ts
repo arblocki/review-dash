@@ -59,6 +59,12 @@ export interface InterdiffResponse {
   newHunkIds: string[];
   /** False when there is no previous review, or the old head is gone (force-push). */
   compareAvailable: boolean;
+  /** Commits between the two heads, as GitHub counts them (0 when there is no comparison). */
+  totalCommits: number;
+  /** `newCommits` is capped and does not list every commit. */
+  commitsTruncated: boolean;
+  /** GitHub's 300-file limit was reached, so `changedFiles` may be incomplete. */
+  filesTruncated: boolean;
 }
 
 /**
@@ -143,6 +149,9 @@ export function registerStateApi(app: Hono, deps: RouteDeps): void {
       changedFiles: [],
       newHunkIds,
       compareAvailable: false,
+      totalCommits: 0,
+      commitsTruncated: false,
+      filesTruncated: false,
     };
     if (!last) return c.json(out);
     if (last === currentHeadSha) return c.json({ ...out, compareAvailable: true });
@@ -153,6 +162,9 @@ export function registerStateApi(app: Hono, deps: RouteDeps): void {
       newCommits: cmp.commits,
       changedFiles: cmp.files,
       compareAvailable: true,
+      totalCommits: cmp.totalCommits,
+      commitsTruncated: cmp.commitsTruncated ?? false,
+      filesTruncated: cmp.filesTruncated ?? false,
     });
   });
 }

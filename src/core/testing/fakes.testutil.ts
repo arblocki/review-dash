@@ -44,7 +44,7 @@ export function fakeGitHub(overrides: Partial<Fixture> = {}): FakeGitHub {
     calls: { submitReview: [], replies: [], fetchPr: 0, compare: [] },
     threads: [],
     contents: {},
-    compare: { commits: [], files: [] },
+    compare: { commits: [], files: [], totalCommits: 0 },
     setHead(sha) {
       pr.headSha = sha;
     },

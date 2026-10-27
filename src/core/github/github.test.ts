@@ -258,10 +258,57 @@ describe('github client compare', () => {
     expect(await gh.compareCommits(ref, 'old', 'new')).toEqual({
       commits: [{ sha: 'c1', message: 'fix', author: 'octocat', date: '2026-01-01T00:00:00Z' }],
       files: ['a.ts', 'b.ts'],
+      totalCommits: 1,
     });
     expect(calls[0]).toBe('GET /repos/{owner}/{repo}/compare/{basehead} old...new');
     expect(await gh.compareCommits(ref, 'gone', 'new')).toBeUndefined();
     expect(await gh.compareCommits(ref, 'bad', 'new')).toBeUndefined();
     await expect(gh.compareCommits(ref, 'boom', 'new')).rejects.toThrow('boom');
+  });
+
+  const fakeCompare = (total: number, fileCount: number) => {
+    const pages: number[] = [];
+    const rest: RestLike = {
+      async request(_route, params) {
+        const page = Number(params?.page);
+        pages.push(page);
+        const from = (page - 1) * 100;
+        const n = Math.max(0, Math.min(100, total - from));
+        return {
+          data: {
+            total_commits: total,
+            commits: Array.from({ length: n }, (_, i) => ({
+              sha: `c${from + i}`,
+              commit: { message: 'm' },
+            })),
+            files:
+              page === 1
+                ? Array.from({ length: fileCount }, (_, i) => ({ filename: `f${i}` }))
+                : [],
+          },
+        };
+      },
+    };
+    return { gh: createGitHubClient({ rest, gql: noGql }), pages };
+  };
+
+  it('follows pages until every commit is fetched', async () => {
+    const { gh, pages } = fakeCompare(150, 3);
+    const r = await gh.compareCommits(ref, 'a', 'b');
+    expect(pages).toEqual([1, 2]);
+    expect(r?.commits).toHaveLength(150);
+    expect(r?.commits[149]?.sha).toBe('c149');
+    expect(r).toMatchObject({ totalCommits: 150 });
+    expect(r?.commitsTruncated).toBeUndefined();
+    expect(r?.filesTruncated).toBeUndefined();
+  });
+
+  it('flags the 300-file limit and caps commits at 1,000', async () => {
+    const { gh, pages } = fakeCompare(2500, 300);
+    const r = await gh.compareCommits(ref, 'a', 'b');
+    expect(pages).toHaveLength(10);
+    expect(r?.commits).toHaveLength(1000);
+    expect(r).toMatchObject({ totalCommits: 2500, commitsTruncated: true, filesTruncated: true });
+    expect(r?.files).toHaveLength(300);
   });
 });
