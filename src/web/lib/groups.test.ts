@@ -199,5 +199,6 @@ describe('verifyId', () => {
   it('uses FNV-1a (known vectors)', () => {
     expect(hash8('')).toBe('811c9dc5');
     expect(hash8('a')).toBe('e40c292c');
+    expect(hash8('foobar')).toBe('bf9cf968');
   });
 });

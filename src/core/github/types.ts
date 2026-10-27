@@ -44,6 +44,18 @@ export interface PrCommit {
   date: string | null;
 }
 
+/** Result of comparing two commits: the commits between them and the files they touch. */
+export interface CompareResult {
+  commits: PrCommit[];
+  files: string[];
+  /** Commits between the two, as GitHub counts them (may exceed `commits.length`). */
+  totalCommits: number;
+  /** `commits` is capped (see MAX_COMPARE_COMMITS) and does not list them all. */
+  commitsTruncated?: boolean;
+  /** The file list hit GitHub's 300-file limit for this endpoint, so it may be incomplete. */
+  filesTruncated?: boolean;
+}
+
 export type ReviewEvent = 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
 
 export interface ReviewComment {
@@ -75,6 +87,11 @@ export interface GitHubClient {
   fetchFileContent(ref: PrRef, path: string, sha: string): Promise<string>;
   fetchReviewThreads(ref: PrRef): Promise<ReviewThread[]>;
   fetchCommits(ref: PrRef): Promise<PrCommit[]>;
+  /**
+   * `GET /compare/{base}...{head}`. Resolves to undefined when GitHub cannot compare the
+   * commits (404/422), e.g. `base` was force-pushed away.
+   */
+  compareCommits(ref: PrRef, base: string, head: string): Promise<CompareResult | undefined>;
   getViewerLogin(): Promise<string>;
   submitReview(ref: PrRef, input: SubmitReviewInput): Promise<SubmittedReview>;
   replyToComment(ref: PrRef, commentId: number, body: string): Promise<{ id: number; url: string }>;

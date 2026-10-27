@@ -4,7 +4,7 @@ import { mkFile } from '../group/files.testutil.js';
 import type { DraftGroup } from '../group/types.js';
 import { applyRisk } from './apply.js';
 import { matchGlob } from './glob.js';
-import { assessRisk, type RiskRule } from './rules.js';
+import { assessRisk, MAX_PATTERN_INPUT_CHARS, type RiskRule } from './rules.js';
 
 const classify = (...f: Parameters<typeof mkFile>[]) => classifyFiles(f.map((x) => mkFile(...x)));
 
@@ -113,5 +113,15 @@ describe('applyRisk', () => {
       autoClear: false,
       risk: 'medium',
     });
+  });
+});
+
+describe('pattern input cap', () => {
+  it('only tests the first 1,000 characters of a line', () => {
+    const rule: RiskRule = { risk: 'high', reason: 'needle', pattern: /needle/ };
+    const early = classify(['a.ts', [`+needle${'x'.repeat(2000)}`]]);
+    const late = classify(['a.ts', [`+${'x'.repeat(MAX_PATTERN_INPUT_CHARS)}needle`]]);
+    expect(assessRisk(early, [rule]).risk).toBe('high');
+    expect(assessRisk(late, [rule]).risk).toBe('low');
   });
 });

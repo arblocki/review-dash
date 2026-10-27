@@ -3,9 +3,11 @@ import { z } from 'zod';
 import { loadPrData, type PrData } from '../core/pr-data.js';
 import type { GitHubClient } from '../core/github/types.js';
 import type { PrRef } from '../core/pr-ref.js';
+import { computeAnchor, reanchorDraft } from '../core/reanchor.js';
 import { buildReview, ReviewError } from '../core/review.js';
-import type { Store } from '../core/store/index.js';
+import type { Draft, DraftInput, Store } from '../core/store/index.js';
 import { registerAnalysisApi, type AnalysisDeps } from './analysis.js';
+import { parseBody, registerStateApi } from './state.js';
 
 const sideSchema = z.enum(['LEFT', 'RIGHT']);
 
@@ -78,22 +80,6 @@ export function registerApi(app: Hono, { pr: ref, github, store, analysis }: Api
     );
   });
 
-  async function parseBody<T>(c: { req: { json(): Promise<unknown> } }, schema: z.ZodType<T>) {
-    let json: unknown;
-    try {
-      json = await c.req.json();
-    } catch {
-      return { error: 'invalid JSON body' } as const;
-    }
-    const parsed = schema.safeParse(json);
-    if (!parsed.success) {
-      return {
-        error: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
-      } as const;
-    }
-    return { data: parsed.data } as const;
-  }
-
   app.get('/api/pr', async (c) => {
     const d = await getData(c.req.query('refresh') === '1');
     return c.json({
@@ -115,6 +101,8 @@ export function registerApi(app: Hono, { pr: ref, github, store, analysis }: Api
     });
   });
 
+  registerStateApi(app, { pr: ref, github, store, getData });
+
   if (analysis) {
     registerAnalysisApi(app, { pr: ref, github, store, getData: () => getData(), analysis });
   }
@@ -128,13 +116,50 @@ export function registerApi(app: Hono, { pr: ref, github, store, analysis }: Api
 
   app.get('/api/threads', async (c) => c.json({ threads: await github.fetchReviewThreads(ref) }));
 
-  app.get('/api/drafts', (c) => c.json({ drafts: store.listDrafts(ref) }));
+  /**
+   * Lists drafts after moving any written against an older head onto `data`'s diff; the ones
+   * that no longer map are marked outdated. Persists what it changes.
+   */
+  function reanchoredDrafts(data: PrData): Draft[] {
+    const drafts = store.listDrafts(ref);
+    let changed = false;
+    for (const d of drafts) {
+      const r = reanchorDraft(d, data.files, data.pr.headSha);
+      if (r.kind === 'moved') {
+        store.moveDraft(ref, d.id, {
+          line: r.line,
+          startLine: r.startLine,
+          headSha: data.pr.headSha,
+        });
+        changed = true;
+      } else if (r.kind === 'outdated') {
+        store.markDraftOutdated(ref, d.id);
+        changed = true;
+      }
+    }
+    return changed ? store.listDrafts(ref) : drafts;
+  }
+
+  app.get('/api/drafts', async (c) => {
+    // Without PR data (GitHub unreachable) the stored drafts are returned as they are.
+    const data = await getData().catch(() => undefined);
+    return c.json({ drafts: data ? reanchoredDrafts(data) : store.listDrafts(ref) });
+  });
 
   app.put('/api/drafts', async (c) => {
     const body = await parseBody(c, draftSchema);
     if ('error' in body) return c.json({ error: body.error }, 400);
+    const input: DraftInput = body.data;
+    if (input.hunkId) {
+      // Remember where the line sits in its hunk so the draft can follow it across pushes.
+      const data = await getData().catch(() => undefined);
+      if (data?.pr.headSha === input.headSha) {
+        const hunk = data.files.flatMap((f) => f.hunks).find((h) => h.id === input.hunkId);
+        if (hunk) input.anchor = computeAnchor(hunk, input);
+      }
+    }
     try {
-      return c.json({ draft: store.upsertDraft(ref, body.data) });
+      return c.json({ draft: store.upsertDraft(ref, input) });
     } catch (err) {
       return c.json({ error: (err as Error).message }, 409);
     }
@@ -156,7 +181,7 @@ export function registerApi(app: Hono, { pr: ref, github, store, analysis }: Api
     const data = live.headSha === cachedData.pr.headSha ? cachedData : await getData(true);
 
     const built = buildReview({
-      drafts: store.listDrafts(ref),
+      drafts: reanchoredDrafts(data),
       files: data.files,
       event,
       body: body.data.body,

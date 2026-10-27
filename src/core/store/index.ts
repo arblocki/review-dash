@@ -8,6 +8,16 @@ import type { ReviewEvent } from '../github/types.js';
 import { formatPrRef, type PrRef } from '../pr-ref.js';
 import { MIGRATIONS } from './schema.js';
 
+/** Where a draft's line sat inside its hunk when written; used to re-anchor after a push. */
+export interface DraftAnchor {
+  /** Index into `hunk.lines` of the commented (end) line. */
+  index: number;
+  /** Index of the range's first line, for multi-line drafts. */
+  startIndex?: number;
+  /** Text of the commented line, which must still match to re-anchor. */
+  text: string;
+}
+
 export interface Draft {
   id: string;
   path: string;
@@ -19,12 +29,31 @@ export interface Draft {
   hunkId?: string;
   /** Head SHA of the PR the draft was written against. */
   headSha: string;
+  /** The diff no longer contains the commented line; excluded from inline comments. */
+  outdated: boolean;
+  anchor?: DraftAnchor;
   updatedAt: string;
   /** Incremented on every upsert; lets a submission detect edits made while it was in flight. */
   revision: number;
 }
 
-export type DraftInput = Omit<Draft, 'id' | 'updatedAt' | 'revision'> & { id?: string };
+export type DraftInput = Omit<Draft, 'id' | 'updatedAt' | 'revision' | 'outdated'> & {
+  id?: string;
+  outdated?: boolean;
+};
+
+export interface ReviewedHunk {
+  hunkId: string;
+  reviewedAt: string;
+  /** PR head the hunk was marked reviewed at. */
+  headSha: string;
+}
+
+export interface VerifyCheck {
+  groupKey: string;
+  itemIndex: number;
+  checked: boolean;
+}
 
 export interface SubmittedReviewRecord {
   headSha: string;
@@ -55,6 +84,24 @@ export interface Store {
    * Returns the ids of drafts kept because they were edited since the snapshot was taken.
    */
   deleteDraftsIfUnchanged(ref: PrRef, snapshot: { id: string; revision: number }[]): string[];
+  /** Moves a draft onto the new diff after a push (clears `outdated`). */
+  moveDraft(
+    ref: PrRef,
+    id: string,
+    pos: { line: number; startLine?: number; headSha: string },
+  ): void;
+  markDraftOutdated(ref: PrRef, id: string): void;
+  /** Marks hunks reviewed at `headSha`; hunks already marked keep their original record. */
+  markReviewed(ref: PrRef, hunkIds: string[], headSha: string): void;
+  unmarkReviewed(ref: PrRef, hunkIds: string[]): void;
+  listReviewed(ref: PrRef): ReviewedHunk[];
+  setVerifyCheck(ref: PrRef, groupKey: string, itemIndex: number, checked: boolean): void;
+  listVerifyChecks(ref: PrRef): VerifyCheck[];
+  /**
+   * Head SHA of the user's most recent review activity: the newest of a hunk being marked
+   * reviewed and a review being submitted.
+   */
+  getLastReviewedHeadSha(ref: PrRef): string | undefined;
   recordSubmittedReview(ref: PrRef, rec: SubmittedReviewRecord): void;
   close(): void;
 }
@@ -69,6 +116,10 @@ interface DraftRow {
   body: string;
   hunk_id: string | null;
   head_sha: string;
+  outdated: number;
+  anchor_index: number | null;
+  anchor_start_index: number | null;
+  anchor_text: string | null;
   updated_at: string;
   revision: number;
 }
@@ -81,12 +132,17 @@ function toDraft(r: DraftRow): Draft {
     line: r.line,
     body: r.body,
     headSha: r.head_sha,
+    outdated: r.outdated !== 0,
     updatedAt: r.updated_at,
     revision: r.revision,
   };
   if (r.start_line !== null) d.startLine = r.start_line;
   if (r.start_side !== null) d.startSide = r.start_side;
   if (r.hunk_id !== null) d.hunkId = r.hunk_id;
+  if (r.anchor_index !== null && r.anchor_text !== null) {
+    d.anchor = { index: r.anchor_index, text: r.anchor_text };
+    if (r.anchor_start_index !== null) d.anchor.startIndex = r.anchor_start_index;
+  }
   return d;
 }
 
@@ -111,12 +167,16 @@ export function openStore(file: string): Store {
     'SELECT * FROM drafts WHERE repo = ? AND pr = ? ORDER BY path, line, updated_at',
   );
   const upsert = db.prepare(`
-    INSERT INTO drafts (id, repo, pr, path, side, line, start_line, start_side, body, hunk_id, head_sha, updated_at, revision)
-    VALUES (@id, @repo, @pr, @path, @side, @line, @startLine, @startSide, @body, @hunkId, @headSha, @updatedAt, 1)
+    INSERT INTO drafts (id, repo, pr, path, side, line, start_line, start_side, body, hunk_id, head_sha,
+      outdated, anchor_index, anchor_start_index, anchor_text, updated_at, revision)
+    VALUES (@id, @repo, @pr, @path, @side, @line, @startLine, @startSide, @body, @hunkId, @headSha,
+      @outdated, @anchorIndex, @anchorStartIndex, @anchorText, @updatedAt, 1)
     ON CONFLICT (id) DO UPDATE SET
       path = excluded.path, side = excluded.side, line = excluded.line,
       start_line = excluded.start_line, start_side = excluded.start_side, body = excluded.body,
-      hunk_id = excluded.hunk_id, head_sha = excluded.head_sha, updated_at = excluded.updated_at,
+      hunk_id = excluded.hunk_id, head_sha = excluded.head_sha, outdated = excluded.outdated,
+      anchor_index = excluded.anchor_index, anchor_start_index = excluded.anchor_start_index,
+      anchor_text = excluded.anchor_text, updated_at = excluded.updated_at,
       revision = drafts.revision + 1
     WHERE drafts.repo = excluded.repo AND drafts.pr = excluded.pr`);
   const get = db.prepare<[string, string, number], DraftRow>(
@@ -125,6 +185,41 @@ export function openStore(file: string): Store {
   const del = db.prepare('DELETE FROM drafts WHERE id = ? AND repo = ? AND pr = ?');
   const delIfRevision = db.prepare(
     'DELETE FROM drafts WHERE id = ? AND repo = ? AND pr = ? AND revision = ?',
+  );
+  const move = db.prepare(
+    `UPDATE drafts SET line = ?, start_line = ?, head_sha = ?, outdated = 0
+     WHERE id = ? AND repo = ? AND pr = ?`,
+  );
+  const outdate = db.prepare('UPDATE drafts SET outdated = 1 WHERE id = ? AND repo = ? AND pr = ?');
+  const markStmt = db.prepare(
+    `INSERT INTO reviewed_hunks (repo, pr, hunk_id, reviewed_at, head_sha) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (repo, pr, hunk_id) DO NOTHING`,
+  );
+  const unmarkStmt = db.prepare(
+    'DELETE FROM reviewed_hunks WHERE repo = ? AND pr = ? AND hunk_id = ?',
+  );
+  const listReviewedStmt = db.prepare<
+    [string, number],
+    { hunk_id: string; reviewed_at: string; head_sha: string }
+  >(
+    'SELECT hunk_id, reviewed_at, head_sha FROM reviewed_hunks WHERE repo = ? AND pr = ? ORDER BY reviewed_at, hunk_id',
+  );
+  const setCheck = db.prepare(
+    `INSERT INTO verify_checks (repo, pr, group_key, item_index, checked) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (repo, pr, group_key, item_index) DO UPDATE SET checked = excluded.checked`,
+  );
+  const listChecks = db.prepare<
+    [string, number],
+    { group_key: string; item_index: number; checked: number }
+  >(
+    'SELECT group_key, item_index, checked FROM verify_checks WHERE repo = ? AND pr = ? ORDER BY group_key, item_index',
+  );
+  const lastReviewed = db.prepare<[string, number, string, number], { head_sha: string }>(
+    `SELECT head_sha FROM (
+       SELECT head_sha, reviewed_at AS at FROM reviewed_hunks WHERE repo = ? AND pr = ?
+       UNION ALL
+       SELECT head_sha, submitted_at AS at FROM reviews_submitted WHERE repo = ? AND pr = ?
+     ) ORDER BY at DESC LIMIT 1`,
   );
   const insertReview = db.prepare(`
     INSERT INTO reviews_submitted (repo, pr, head_sha, github_review_id, event, submitted_at)
@@ -190,6 +285,10 @@ export function openStore(file: string): Store {
         body: input.body,
         hunkId: input.hunkId ?? null,
         headSha: input.headSha,
+        outdated: input.outdated ? 1 : 0,
+        anchorIndex: input.anchor?.index ?? null,
+        anchorStartIndex: input.anchor?.startIndex ?? null,
+        anchorText: input.anchor?.text ?? null,
         updatedAt: new Date().toISOString(),
       });
       const row = get.get(id, repo, ref.number);
@@ -221,6 +320,53 @@ export function openStore(file: string): Store {
         }
         return kept;
       })();
+    },
+    moveDraft(ref, id, pos) {
+      move.run(
+        pos.line,
+        pos.startLine ?? null,
+        pos.headSha,
+        id,
+        `${ref.owner}/${ref.repo}`,
+        ref.number,
+      );
+    },
+    markDraftOutdated(ref, id) {
+      outdate.run(id, `${ref.owner}/${ref.repo}`, ref.number);
+    },
+    markReviewed(ref, hunkIds, headSha) {
+      const repo = `${ref.owner}/${ref.repo}`;
+      const at = new Date().toISOString();
+      db.transaction(() => {
+        for (const id of hunkIds) markStmt.run(repo, ref.number, id, at, headSha);
+      })();
+    },
+    unmarkReviewed(ref, hunkIds) {
+      const repo = `${ref.owner}/${ref.repo}`;
+      db.transaction(() => {
+        for (const id of hunkIds) unmarkStmt.run(repo, ref.number, id);
+      })();
+    },
+    listReviewed(ref) {
+      return listReviewedStmt.all(`${ref.owner}/${ref.repo}`, ref.number).map((r) => ({
+        hunkId: r.hunk_id,
+        reviewedAt: r.reviewed_at,
+        headSha: r.head_sha,
+      }));
+    },
+    setVerifyCheck(ref, groupKey, itemIndex, checked) {
+      setCheck.run(`${ref.owner}/${ref.repo}`, ref.number, groupKey, itemIndex, checked ? 1 : 0);
+    },
+    listVerifyChecks(ref) {
+      return listChecks.all(`${ref.owner}/${ref.repo}`, ref.number).map((r) => ({
+        groupKey: r.group_key,
+        itemIndex: r.item_index,
+        checked: r.checked !== 0,
+      }));
+    },
+    getLastReviewedHeadSha(ref) {
+      const repo = `${ref.owner}/${ref.repo}`;
+      return lastReviewed.get(repo, ref.number, repo, ref.number)?.head_sha;
     },
     recordSubmittedReview(ref, rec) {
       insertReview.run(

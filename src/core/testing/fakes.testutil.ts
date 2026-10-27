@@ -1,6 +1,12 @@
 import { readFileSync } from 'node:fs';
 import type { RawFile } from '../diff/types.js';
-import type { GitHubClient, PrMeta, ReviewThread, SubmitReviewInput } from '../github/types.js';
+import type {
+  CompareResult,
+  GitHubClient,
+  PrMeta,
+  ReviewThread,
+  SubmitReviewInput,
+} from '../github/types.js';
 
 export interface Fixture {
   pr: PrMeta;
@@ -18,10 +24,17 @@ export interface FakeGitHub extends GitHubClient {
     submitReview: SubmitReviewInput[];
     replies: { id: number; body: string }[];
     fetchPr: number;
+    compare: { base: string; head: string }[];
   };
   setHead(sha: string): void;
   /** Edits PR metadata (title/body/...) without moving the head. */
   setMeta(patch: Partial<PrMeta>): void;
+  /** File contents served by fetchFileContent, by path; unknown `.review-dash.y*ml` is a 404. */
+  contents: Record<string, string>;
+  /** Like `contents` but for one commit, keyed `${path}@${sha}`; wins over `contents`. */
+  contentsAt: Record<string, string>;
+  /** What compareCommits returns (undefined = 404, as after a force-push). */
+  compare: CompareResult | undefined;
   threads: ReviewThread[];
 }
 
@@ -30,8 +43,11 @@ export function fakeGitHub(overrides: Partial<Fixture> = {}): FakeGitHub {
   const fx = { ...loadFixture(), ...overrides };
   const pr = { ...fx.pr };
   const fake: FakeGitHub = {
-    calls: { submitReview: [], replies: [], fetchPr: 0 },
+    calls: { submitReview: [], replies: [], fetchPr: 0, compare: [] },
     threads: [],
+    contents: {},
+    contentsAt: {},
+    compare: { commits: [], files: [], totalCommits: 0 },
     setHead(sha) {
       pr.headSha = sha;
     },
@@ -46,6 +62,11 @@ export function fakeGitHub(overrides: Partial<Fixture> = {}): FakeGitHub {
       return fx.files;
     },
     async fetchFileContent(_ref, path, sha) {
+      const known = fake.contentsAt[`${path}@${sha}`] ?? fake.contents[path];
+      if (known !== undefined) return known;
+      if (/^\.review-dash\.ya?ml$/.test(path)) {
+        throw Object.assign(new Error('Not Found'), { status: 404 });
+      }
       return `content of ${path}@${sha}`;
     },
     async fetchReviewThreads() {
@@ -53,6 +74,10 @@ export function fakeGitHub(overrides: Partial<Fixture> = {}): FakeGitHub {
     },
     async fetchCommits() {
       return [];
+    },
+    async compareCommits(_ref, base, head) {
+      fake.calls.compare.push({ base, head });
+      return fake.compare;
     },
     async getViewerLogin() {
       return fx.viewer;

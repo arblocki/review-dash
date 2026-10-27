@@ -31,7 +31,11 @@ async function main(): Promise<void> {
   const config = loadConfig();
   if (opts.provider) config.provider = opts.provider;
   if (opts.model) config.models[config.provider] = opts.model;
-  const analysis: AnalysisDeps = { config, createProvider: (sel) => createProvider(config, sel) };
+  const analysis: AnalysisDeps = {
+    config,
+    createProvider: (sel) => createProvider(config, sel),
+    trustPrConfig: opts.trustPrConfig,
+  };
   const server = await startServer({ pr: opts.pr, port: opts.port, github, store, analysis });
   const url = `http://127.0.0.1:${server.port}/#token=${server.token}`;
   console.log(`Reviewing ${formatPrRef(opts.pr)}`);

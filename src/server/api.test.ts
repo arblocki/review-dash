@@ -203,24 +203,22 @@ describe('POST /api/review', () => {
     expect(left.some((d) => d.id === b.id)).toBe(false);
   });
 
-  it('returns 409 when head moved, and submits with force against the new head', async () => {
+  it('submits against the new head, flagging drafts that cannot be re-anchored as outdated', async () => {
     const { call, github } = setup();
-    await call('PUT', '/api/drafts', draft);
+    await call('PUT', '/api/drafts', draft); // no hunk anchor, so it cannot follow a push
     github.setHead('3333333333333333333333333333333333333333');
-    const res = await call('POST', '/api/review', { event: 'COMMENT', headSha: HEAD });
-    expect(res.status).toBe(409);
-    expect(await res.json()).toMatchObject({ code: 'head_moved' });
-    expect(github.calls.submitReview).toHaveLength(0);
-    const forced = await call('POST', '/api/review', {
+    const list = await (await call('GET', '/api/drafts')).json();
+    expect(list.drafts[0]).toMatchObject({ outdated: true, headSha: HEAD });
+    const res = await call('POST', '/api/review', {
       event: 'COMMENT',
-      headSha: HEAD,
-      force: true,
+      headSha: '3333333333333333333333333333333333333333', // after reloading the new head
     });
-    expect(forced.status).toBe(200);
-    expect(github.calls.submitReview[0]?.headSha).toBe('3333333333333333333333333333333333333333');
-    expect(github.calls.submitReview[0]?.comments).toEqual([]);
-    expect(github.calls.submitReview[0]?.body).toContain('(outdated: written against');
-    expect((await forced.json()).outdated).toHaveLength(1);
+    expect(res.status).toBe(200);
+    const sent = github.calls.submitReview[0]!;
+    expect(sent.headSha).toBe('3333333333333333333333333333333333333333');
+    expect(sent.comments).toEqual([]);
+    expect(sent.body).toContain('outdated');
+    expect((await res.json()).outdated).toHaveLength(1);
   });
 
   it('returns 409 for a bare approval after a new push, with no drafts at all', async () => {
