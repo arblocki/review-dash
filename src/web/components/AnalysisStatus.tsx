@@ -1,5 +1,6 @@
 import { useAnalysis } from '../analysis';
 import { describeAnalysisError, type ViewMode } from '../lib/groups';
+import { providerNotice } from '../lib/providerNotice';
 
 /** Skeleton shown in the main pane of a grouped view while analysis is running. */
 export function AnalysisSkeleton() {
@@ -44,6 +45,28 @@ export function AnalysisError({ view, onView }: { view: ViewMode; onView(v: View
         )}
       </div>
     </div>
+  );
+}
+
+/** Says which provider produced the displayed groups while a switch is running or has failed. */
+export function ProviderNotice() {
+  const { result, providers, choice, loading, error } = useAnalysis();
+  const requested = choice ?? providers?.current ?? null;
+  const text = providerNotice({
+    displayed: result ? { provider: result.analysis.provider, model: result.analysis.model } : null,
+    requested,
+    loading,
+    error: error?.message ?? null,
+  });
+  if (!text) return null;
+  return (
+    <p
+      role="status"
+      data-testid="provider-notice"
+      className="mb-3 rounded bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+    >
+      {text}
+    </p>
   );
 }
 

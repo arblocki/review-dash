@@ -1,7 +1,12 @@
 import { useCallback, useMemo, useState } from 'react';
 import { AnalysisProvider, useAnalysis } from './analysis';
 import { AnalysisBar } from './components/AnalysisBar';
-import { AnalysisBanner, AnalysisError, AnalysisSkeleton } from './components/AnalysisStatus';
+import {
+  AnalysisBanner,
+  AnalysisError,
+  AnalysisSkeleton,
+  ProviderNotice,
+} from './components/AnalysisStatus';
 import { FileList } from './components/FileList';
 import { GroupCard } from './components/GroupCard';
 import { GroupPicker } from './components/GroupPicker';
@@ -59,6 +64,7 @@ function Review() {
     main = (
       <>
         {error && !loading && <AnalysisError view={view} onView={setChoice} />}
+        <ProviderNotice />
         <GroupPicker groups={groups} selectedKey={group.key} onSelect={select} />
         <GroupCard
           key={group.key}
