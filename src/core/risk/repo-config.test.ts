@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadRepoConfig, parseRepoConfig } from './repo-config.js';
+import { loadRepoConfig, parseRepoConfig, unsafePatternReason } from './repo-config.js';
 import { BUILTIN_RULES } from './rules.js';
 
 const ref = { owner: 'o', repo: 'r', number: 1 };
@@ -50,6 +50,35 @@ notes: |
     expect(() => parseRepoConfig('rules:\n  - {risk: low, reason: x}')).toThrow(
       /glob or a pattern/,
     );
+  });
+});
+
+describe('unsafe patterns', () => {
+  it('flags nested quantifiers, long patterns and backreferences', () => {
+    expect(unsafePatternReason('(a+)+$')).toMatch(/ReDoS/);
+    expect(unsafePatternReason('([a-z]+)*x')).toBeDefined();
+    expect(unsafePatternReason('a'.repeat(201))).toMatch(/200/);
+    expect(unsafePatternReason('(a)\\1')).toMatch(/backreference/);
+    expect(unsafePatternReason('eval\\(')).toBeUndefined();
+    expect(unsafePatternReason('^\\s*export\\s')).toBeUndefined();
+  });
+
+  it('skips an unsafe rule with a warning and keeps the others', () => {
+    const c = parseRepoConfig(`
+rules:
+  - {pattern: '(a+)+$', risk: high, reason: Evil}
+  - {glob: 'x/**', risk: high, reason: Fine}
+`);
+    expect(c.rules).toEqual([{ risk: 'high', reason: 'Fine', glob: 'x/**' }]);
+    expect(c.warnings).toHaveLength(1);
+    expect(c.warnings![0]).toMatch(/Evil/);
+  });
+
+  it('surfaces skipped rules as the loaded config warning', async () => {
+    const text = "rules:\n  - {pattern: '(a+)+$', risk: high, reason: Evil}";
+    const c = await loadRepoConfig(client({ '.review-dash.yaml': text }), ref, 'sha');
+    expect(c.rules).toEqual(BUILTIN_RULES);
+    expect(c.warning).toMatch(/Skipped rule "Evil"/);
   });
 });
 

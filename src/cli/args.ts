@@ -9,6 +9,8 @@ export interface CliOptions {
   port?: number;
   open: boolean;
   debug: boolean;
+  /** Read .review-dash.yaml and REVIEW.md at the PR head instead of the base commit. */
+  trustPrConfig: boolean;
 }
 
 export const USAGE = `Usage: review-dash <owner/repo#123 | https://github.com/owner/repo/pull/123> [options]
@@ -18,6 +20,8 @@ Options:
   --model <name>     LLM model
   --port <n>         Port to listen on (default: random free port)
   --no-open          Do not open the browser
+  --trust-pr-config  Use the PR's own .review-dash.yaml and REVIEW.md (default: the base
+                     branch's, since a PR could change its own review rules)
   --debug            Verbose logging
   -h, --help         Show this help`;
 
@@ -34,6 +38,7 @@ export function parseCli(argv: string[]): CliOptions | 'help' {
         model: { type: 'string' },
         port: { type: 'string' },
         'no-open': { type: 'boolean', default: false },
+        'trust-pr-config': { type: 'boolean', default: false },
         debug: { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h', default: false },
       },
@@ -69,5 +74,6 @@ export function parseCli(argv: string[]): CliOptions | 'help' {
     port,
     open: !values['no-open'],
     debug: values.debug,
+    trustPrConfig: values['trust-pr-config'],
   };
 }

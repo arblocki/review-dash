@@ -79,6 +79,9 @@ export const BUILTIN_RULES: readonly RiskRule[] = [
   },
 ];
 
+/** Custom patterns only ever see this many characters of a line (bounds regex work). */
+export const MAX_PATTERN_INPUT_CHARS = 1000;
+
 /** Groups deleting more than this many lines get a medium-risk bump. */
 export const LARGE_DELETION_LINES = 100;
 
@@ -104,7 +107,7 @@ export function ruleMatchesTarget(
   if (rule.pathPattern && !rule.pathPattern.test(target.path)) return false;
   if (rule.pattern) {
     const re = rule.pattern;
-    if (!target.changed.some((c) => re.test(c))) return false;
+    if (!target.changed.some((c) => re.test(c.slice(0, MAX_PATTERN_INPUT_CHARS)))) return false;
   }
   return true;
 }

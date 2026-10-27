@@ -10,7 +10,9 @@ describe('parseCli', () => {
       port: undefined,
       open: true,
       debug: false,
+      trustPrConfig: false,
     });
+    expect(parseCli(['o/r#1', '--trust-pr-config'])).toMatchObject({ trustPrConfig: true });
   });
 
   it('parses flags', () => {

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import safeRegex from 'safe-regex2';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 import type { GitHubClient } from '../github/types.js';
@@ -6,6 +7,21 @@ import type { PrRef } from '../pr-ref.js';
 import { BUILTIN_RULES, type RiskRule } from './rules.js';
 
 export const REPO_CONFIG_FILES = ['.review-dash.yaml', '.review-dash.yml'] as const;
+
+/** Longest custom pattern accepted; longer ones are skipped with a warning. */
+export const MAX_PATTERN_CHARS = 200;
+
+/**
+ * Why a custom regex is refused, or undefined when it looks safe. Conservative: a PR can
+ * supply patterns, so anything that may backtrack catastrophically (nested quantifiers,
+ * ambiguous repetition) or uses backreferences is rejected.
+ */
+export function unsafePatternReason(source: string): string | undefined {
+  if (source.length > MAX_PATTERN_CHARS) return `longer than ${MAX_PATTERN_CHARS} characters`;
+  if (/\\[1-9]|\\k</.test(source)) return 'uses a backreference';
+  if (!safeRegex(source)) return 'has nested or ambiguous repetition (possible ReDoS)';
+  return undefined;
+}
 
 const regexString = z.string().refine(
   (s) => {
@@ -41,6 +57,8 @@ export interface RepoConfig {
   rules: RiskRule[];
   /** Extra guidance for the grouping model, like REVIEW.md. */
   notes?: string;
+  /** Rules that were skipped (unsafe pattern), one message each. */
+  warnings?: string[];
 }
 
 /** Parses the text of a .review-dash.yaml. Throws an Error with a readable message. */
@@ -57,13 +75,21 @@ export function parseRepoConfig(text: string): RepoConfig {
       parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; '),
     );
   }
-  const rules = (parsed.data.rules ?? []).map((r): RiskRule => {
+  const rules: RiskRule[] = [];
+  const warnings: string[] = [];
+  for (const r of parsed.data.rules ?? []) {
+    const unsafe = r.pattern !== undefined ? unsafePatternReason(r.pattern) : undefined;
+    if (unsafe) {
+      warnings.push(`Skipped rule "${r.reason}": its pattern ${unsafe}`);
+      continue;
+    }
     const rule: RiskRule = { risk: r.risk, reason: r.reason };
     if (r.glob !== undefined) rule.glob = r.glob;
     if (r.pattern !== undefined) rule.pattern = new RegExp(r.pattern);
-    return rule;
-  });
+    rules.push(rule);
+  }
   const config: RepoConfig = { rules };
+  if (warnings.length > 0) config.warnings = warnings;
   const notes = parsed.data.notes?.trim();
   if (notes) config.notes = notes;
   return config;
@@ -107,6 +133,7 @@ export async function loadRepoConfig(
       return {
         rules: [...BUILTIN_RULES, ...config.rules],
         ...(config.notes ? { notes: config.notes } : {}),
+        ...(config.warnings ? { warning: config.warnings.join('; ') } : {}),
         hash,
       };
     } catch (err) {
