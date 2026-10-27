@@ -52,6 +52,8 @@ function usePersistentState<T extends string | boolean>(key: string, initial: T)
 export interface ReviewContextValue {
   session: SessionInfo;
   pr: PrMeta;
+  /** Hash of the loaded diff; changes when a refresh brings different hunks. */
+  diffHash: string;
   files: ParsedFile[];
   viewer: string;
   isSelfReview: boolean;
@@ -322,6 +324,7 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
       loaded && {
         session: loaded.session,
         pr: loaded.data.pr,
+        diffHash: loaded.data.diffHash,
         files: loaded.data.files,
         viewer: loaded.data.viewer,
         isSelfReview: loaded.data.isSelfReview,

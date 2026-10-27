@@ -9,12 +9,12 @@ import { AllFilesDiff } from './components/HunkList';
 import { Header } from './components/Header';
 import { Layout } from './components/Layout';
 import { SubmitModal } from './components/SubmitModal';
-import { orderGroups, pickGroup, type ViewMode } from './lib/groups';
+import { orderGroups, pickGroup, resolveView, type ViewMode } from './lib/groups';
 import { ReviewProvider, useReview } from './state';
 
 function Review() {
   const { files, threadsError } = useReview();
-  const { result, loading, error } = useAnalysis();
+  const { result, loading, error, stale } = useAnalysis();
   const [submitting, setSubmitting] = useState(false);
   const [choice, setChoice] = useState<ViewMode | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -22,8 +22,9 @@ function Review() {
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
 
   const analysis = result?.analysis;
-  // By group becomes the default as soon as an analysis exists; until then the M1 view shows.
-  const view: ViewMode = choice ?? (analysis ? 'group' : 'file');
+  // By group becomes the default as soon as an analysis exists; until then (or while the
+  // analysis is for an older head) the M1 view shows.
+  const view: ViewMode = resolveView(choice, !!analysis, stale);
   const groups = useMemo(
     () => (analysis ? orderGroups(analysis.groups, view) : []),
     [analysis, view],

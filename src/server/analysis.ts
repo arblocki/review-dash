@@ -94,9 +94,11 @@ export function registerAnalysisApi(app: Hono, deps: RouteDeps): void {
         model: sel.model,
         promptVersion: PROMPT_VERSION,
       };
+      // Which PR version this analysis describes, so the UI can tell when it has gone stale.
+      const computedFor = { headSha: data.pr.headSha, diffHash: data.diffHash };
       if (!force) {
         const hit = store.getAnalysis(ref, key);
-        if (hit) return c.json({ analysis: hit, cached: true });
+        if (hit) return c.json({ analysis: hit, cached: true, ...computedFor });
       }
 
       const flightKey = JSON.stringify(key);
@@ -112,7 +114,7 @@ export function registerAnalysisApi(app: Hono, deps: RouteDeps): void {
         const clear = () => inflight.delete(flightKey);
         flight.then(clear, clear);
       }
-      return c.json({ analysis: await flight, cached: false, shared });
+      return c.json({ analysis: await flight, cached: false, shared, ...computedFor });
     } catch (err) {
       const { status: code, code: kind } = status(err);
       return c.json({ error: (err as Error).message, code: kind }, code);

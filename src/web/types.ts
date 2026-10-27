@@ -71,6 +71,9 @@ export interface AnalysisResponse {
   analysis: import('../core/group/types').Analysis;
   cached: boolean;
   shared?: boolean;
+  /** The PR head and diff hash the analysis was computed for (absent from older servers). */
+  headSha?: string;
+  diffHash?: string;
 }
 
 /** GET /api/providers */

@@ -9,9 +9,11 @@ const input =
 
 /** Second header row: view switcher, provider/model, Re-analyze, usage line, and PR summary. */
 export function AnalysisBar({ view, onView }: { view: ViewMode; onView(v: ViewMode): void }) {
-  const { result, loading, elapsedS, providers, choice, setChoice, reanalyze } = useAnalysis();
+  const { result, stale, loading, elapsedS, providers, choice, setChoice, reanalyze } =
+    useAnalysis();
   const [summaryOpen, setSummaryOpen] = useState(false);
-  const analysis = result?.analysis;
+  // A stale analysis describes an older head; its summary and badges must not read as current.
+  const analysis = stale ? undefined : result?.analysis;
 
   const provider = choice?.provider ?? providers?.current.provider ?? analysis?.provider ?? '';
   const appliedModel = choice?.model ?? providers?.current.model ?? analysis?.model ?? '';

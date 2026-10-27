@@ -3,6 +3,7 @@
  * so the UI can be tried or smoke-tested without a token. Not part of the shipped CLI.
  *
  *   pnpm demo [--port 5175] [--self]     (--self: viewer is the PR author)
+ *   kill -USR2 <pid>                      simulate a push; Refresh in the UI shows it
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -99,6 +100,8 @@ export interface Demo {
   server: RunningServer;
   url: string;
   github: FakeGitHub;
+  /** Simulates a push: new head sha and a changed greet.ts hunk, picked up by the next Refresh. */
+  moveHead(): void;
   close(): Promise<void>;
 }
 
@@ -225,9 +228,17 @@ export async function startDemo(opts: { port?: number; self?: boolean } = {}): P
         ),
     },
   });
+  let moves = 0;
+  const moveHead = () => {
+    moves++;
+    const idx = files.findIndex((f) => f.filename === 'src/greet.ts');
+    files[idx] = file('src/greet.ts', GREET_OLD, GREET_NEW.replace("'Hello'", `'Hello${moves}'`));
+    github.setHead(String(moves).repeat(40).slice(0, 40));
+  };
   return {
     server,
     github,
+    moveHead,
     url: `http://127.0.0.1:${server.port}/#token=${server.token}`,
     close: server.close,
   };
@@ -240,5 +251,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     self: process.argv.includes('--self'),
   });
   console.log(`Demo (fake GitHub): ${demo.url}`);
+  // Smoke tests: `kill -USR2 <pid>` simulates a push; click Refresh in the UI to pick it up.
+  process.on('SIGUSR2', () => demo.moveHead());
   process.on('SIGINT', () => void demo.close().then(() => process.exit(0)));
 }

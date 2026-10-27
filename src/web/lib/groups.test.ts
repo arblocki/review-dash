@@ -10,6 +10,7 @@ import {
   itemCounts,
   orderGroups,
   pickGroup,
+  resolveView,
   riskBadge,
   usageParts,
   verifyId,
@@ -129,5 +130,18 @@ describe('formatting', () => {
     expect(describeAnalysisError('unsupported', 'x').hint).toMatch(/Upgrade/);
     expect(describeAnalysisError('auth', 'x').title).toMatch(/signed in/);
     expect(describeAnalysisError('weird', 'x').title).toBe('Analysis failed');
+  });
+});
+
+describe('resolveView', () => {
+  it('defaults to By group once an analysis exists, else By file', () => {
+    expect(resolveView(null, true, false)).toBe('group');
+    expect(resolveView(null, false, false)).toBe('file');
+    expect(resolveView('tests', true, false)).toBe('tests');
+  });
+
+  it('forces By file while the analysis is stale, whatever the choice', () => {
+    expect(resolveView(null, true, true)).toBe('file');
+    expect(resolveView('group', true, true)).toBe('file');
   });
 });

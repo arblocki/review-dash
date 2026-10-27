@@ -116,6 +116,29 @@ describe('GET /api/analysis', () => {
     expect(created.at(-1)).toEqual({ provider: 'openrouter', model: 'x/y' });
   });
 
+  it('reports the head and diff the analysis was computed for', async () => {
+    const { get, github } = setup(() => new FakeProvider([reply, reply]));
+    const pr1 = (await get('/api/pr')).json;
+    const first = await get('/api/analysis');
+    expect(first.json).toMatchObject({
+      cached: false,
+      headSha: pr1.pr.headSha,
+      diffHash: pr1.diffHash,
+    });
+    const hit = await get('/api/analysis');
+    expect(hit.json).toMatchObject({
+      cached: true,
+      headSha: pr1.pr.headSha,
+      diffHash: pr1.diffHash,
+    });
+
+    github.setHead('b'.repeat(40));
+    await get('/api/pr?refresh=1');
+    const moved = await get('/api/analysis');
+    expect(moved.json.cached).toBe(false);
+    expect(moved.json.headSha).toBe('b'.repeat(40));
+  });
+
   it('re-analyzes when the PR title or body changes at the same head', async () => {
     const { get, github, created } = setup(() => new FakeProvider([reply]));
     const refresh = async () => {

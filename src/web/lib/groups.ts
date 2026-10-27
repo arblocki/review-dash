@@ -10,6 +10,19 @@ export const VIEW_LABELS: Record<ViewMode, string> = {
   file: 'By file',
 };
 
+/**
+ * The view to show: the user's choice, else By group once an analysis exists. A stale analysis
+ * (computed for an older head) is never presented as current, so it forces By file.
+ */
+export function resolveView(
+  choice: ViewMode | null,
+  hasAnalysis: boolean,
+  stale: boolean,
+): ViewMode {
+  if (stale) return 'file';
+  return choice ?? (hasAnalysis ? 'group' : 'file');
+}
+
 /** Groups in the order a view shows them. Analysis order is already risk/dependency order. */
 export function orderGroups(groups: AnalysisGroup[], view: ViewMode): AnalysisGroup[] {
   if (view !== 'tests') return groups;

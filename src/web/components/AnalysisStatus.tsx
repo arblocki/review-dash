@@ -49,7 +49,23 @@ export function AnalysisError({ view, onView }: { view: ViewMode; onView(v: View
 
 /** Slim banner above the file view while analysis runs in the background. */
 export function AnalysisBanner() {
-  const { loading, elapsedS } = useAnalysis();
+  const { loading, elapsedS, stale, result } = useAnalysis();
+  if (stale) {
+    const sha = result?.headSha?.slice(0, 7) ?? '';
+    return (
+      <p
+        role="status"
+        data-testid="stale-banner"
+        className="mb-3 flex items-center gap-2 rounded bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+      >
+        {loading && (
+          <span className="inline-block size-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        )}
+        Analysis is for an older version of this PR ({sha}){loading ? ' — re-analyzing…' : '.'}{' '}
+        Showing the By file view meanwhile.
+      </p>
+    );
+  }
   if (!loading) return null;
   return (
     <p className="mb-3 flex items-center gap-2 rounded bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:bg-blue-950 dark:text-blue-200">

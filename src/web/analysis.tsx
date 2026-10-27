@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from 'react';
 import { api, ApiError } from './api';
+import { isStale, needsReanalysis, prVersionKey } from './lib/staleness';
+import { useReview } from './state';
 import type { AnalysisResponse, ProvidersResponse } from './types';
 
 export interface ProviderChoice {
@@ -19,6 +21,8 @@ export interface ProviderChoice {
 export interface AnalysisContextValue {
   /** Last successful analysis; kept while a re-analysis is running. */
   result: AnalysisResponse | null;
+  /** The displayed result was computed for an older head/diff than the loaded PR. */
+  stale: boolean;
   loading: boolean;
   /** Seconds since the current request started. */
   elapsedS: number;
@@ -40,9 +44,16 @@ export function useAnalysis(): AnalysisContextValue {
 
 /**
  * Requests /api/analysis in the background so the file view stays usable. The request is
- * aborted and replaced when the provider/model changes or Re-analyze is pressed.
+ * aborted and replaced when the provider/model changes, Re-analyze is pressed, or a refresh
+ * loads a different head/diff (then the old result is `stale` until the new one arrives).
  */
 export function AnalysisProvider({ children }: { children: ReactNode }) {
+  const { pr, diffHash } = useReview();
+  const version = { headSha: pr.headSha, diffHash };
+  const versionRef = useRef(version);
+  versionRef.current = version;
+  // PR version the latest request was started for.
+  const requestedRef = useRef<string | null>(null);
   const [result, setResult] = useState<AnalysisResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [elapsedS, setElapsedS] = useState(0);
@@ -58,6 +69,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const ctl = new AbortController();
+    requestedRef.current = prVersionKey(versionRef.current);
     const started = Date.now();
     setLoading(true);
     setError(null);
@@ -91,6 +103,15 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
     };
   }, [req]);
 
+  // A refresh that brought a new head/diff: ask again (the server cache answers if it can).
+  useEffect(() => {
+    if (needsReanalysis(requestedRef.current, versionRef.current)) {
+      setReq((r) => ({ id: r.id + 1, force: false }));
+    }
+  }, [pr.headSha, diffHash]);
+
+  const stale = isStale(result, version);
+
   const setChoice = useCallback((c: ProviderChoice) => {
     choiceRef.current = c;
     setChoiceState(c);
@@ -99,8 +120,8 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
   const reanalyze = useCallback(() => setReq((r) => ({ id: r.id + 1, force: true })), []);
 
   const value = useMemo(
-    () => ({ result, loading, elapsedS, error, providers, choice, setChoice, reanalyze }),
-    [result, loading, elapsedS, error, providers, choice, setChoice, reanalyze],
+    () => ({ result, stale, loading, elapsedS, error, providers, choice, setChoice, reanalyze }),
+    [result, stale, loading, elapsedS, error, providers, choice, setChoice, reanalyze],
   );
   return <AnalysisContext.Provider value={value}>{children}</AnalysisContext.Provider>;
 }
