@@ -7,7 +7,7 @@ export type ReReview =
 
 /** What the re-review banner says, or null when there is nothing new since the last review. */
 export function reReviewInfo(i: InterdiffResponse | null): ReReview | null {
-  if (!i || !i.lastReviewedHeadSha || i.lastReviewedHeadSha === i.currentHeadSha) return null;
+  if (!i || !i.reviewBaselineHeadSha || i.reviewBaselineHeadSha === i.currentHeadSha) return null;
   if (!i.compareAvailable) return { kind: 'rewritten' };
   return { kind: 'commits', count: i.newCommits.length };
 }

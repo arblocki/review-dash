@@ -110,7 +110,7 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
         setPhase({ kind: 'unsynced', failed: outcome.failed });
         return;
       }
-      void reloadInterdiff(true);
+      void reloadInterdiff();
       setPhase({ kind: 'done', result: outcome.result, refreshError: outcome.refreshError });
     } catch (err) {
       if (err instanceof ApiError && err.code === 'head_moved') {

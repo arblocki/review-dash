@@ -94,12 +94,13 @@ export interface ReviewStateResponse {
   reviewedHunkIds: string[];
   reviewedAt: Record<string, { reviewedAt: string; headSha: string }>;
   verifyChecks: Record<string, { index: number; itemHash: string }[]>;
-  lastReviewedHeadSha?: string;
+  reviewBaselineHeadSha?: string;
 }
 
 /** GET /api/interdiff */
 export interface InterdiffResponse {
-  lastReviewedHeadSha: string | null;
+  /** Head the reviewer is caught up to; the banner compares from here. */
+  reviewBaselineHeadSha: string | null;
   currentHeadSha: string;
   newCommits: { sha: string; message: string; author?: string | null; date?: string | null }[];
   changedFiles: string[];

@@ -8,7 +8,7 @@ import {
 } from './rereview';
 
 const base: InterdiffResponse = {
-  lastReviewedHeadSha: 'aaa',
+  reviewBaselineHeadSha: 'aaa',
   currentHeadSha: 'bbb',
   newCommits: [{ sha: '1', message: 'm' }],
   changedFiles: ['a.ts'],
@@ -22,7 +22,7 @@ const base: InterdiffResponse = {
 describe('reReviewInfo', () => {
   it('is null without interdiff, without a previous review, or when the head is unchanged', () => {
     expect(reReviewInfo(null)).toBeNull();
-    expect(reReviewInfo({ ...base, lastReviewedHeadSha: null })).toBeNull();
+    expect(reReviewInfo({ ...base, reviewBaselineHeadSha: null })).toBeNull();
     expect(reReviewInfo({ ...base, currentHeadSha: 'aaa' })).toBeNull();
   });
   it('counts commits', () => {

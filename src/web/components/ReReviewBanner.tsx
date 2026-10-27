@@ -18,7 +18,7 @@ export function HideReviewedToggle() {
 
 /** Shown when the PR head differs from the head at the last submitted review. */
 export function ReReviewBanner() {
-  const { reReview, interdiff } = useReviewState();
+  const { reReview, interdiff, markDoneReviewing } = useReviewState();
   const [open, setOpen] = useState(false);
   if (!reReview || !interdiff) return null;
   const notes = interdiffTruncationNotes(interdiff);
@@ -31,7 +31,7 @@ export function ReReviewBanner() {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <span className="font-medium">{reReviewText(reReview)}</span>
         <span className="font-mono text-xs">
-          {interdiff.lastReviewedHeadSha?.slice(0, 7)} → {interdiff.currentHeadSha.slice(0, 7)}
+          {interdiff.reviewBaselineHeadSha?.slice(0, 7)} → {interdiff.currentHeadSha.slice(0, 7)}
         </span>
         {(detail || interdiff.changedFiles.length > 0) && (
           <button
@@ -43,8 +43,15 @@ export function ReReviewBanner() {
             {open ? 'Hide details' : 'Show commits and files'}
           </button>
         )}
-        <span className="ml-auto">
+        <span className="ml-auto flex items-center gap-3">
           <HideReviewedToggle />
+          <button
+            type="button"
+            className="rounded border border-blue-400 px-2 py-0.5 text-blue-900 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-100 dark:hover:bg-blue-900/50"
+            onClick={() => void markDoneReviewing()}
+          >
+            Done reviewing these changes
+          </button>
         </span>
       </div>
       {notes.map((n) => (

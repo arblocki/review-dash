@@ -43,8 +43,10 @@ export interface ReviewStateValue {
   setHideReviewed(v: boolean): void;
   /** Re-fetches the PR head from GitHub; resolves to the current head sha. */
   checkHead(): Promise<string | null>;
-  /** Re-fetches interdiff; `reset` also drops the sticky banner (after submitting a review). */
-  reloadInterdiff(reset?: boolean): Promise<void>;
+  /** Re-fetches interdiff (after submitting a review or moving the checkpoint). */
+  reloadInterdiff(): Promise<void>;
+  /** Moves the re-review baseline to the current head; the banner goes away. */
+  markDoneReviewing(): Promise<void>;
   error: string | null;
   /** The error is a stale-head conflict: refreshing the PR is the fix. */
   errorNeedsRefresh: boolean;
@@ -88,9 +90,6 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
   const [reviewed, setReviewedState] = useState<ReadonlySet<string>>(new Set());
   const [verifyChecked, setVerifyChecked] = useState<ReadonlySet<string>>(new Set());
   const [interdiff, setInterdiff] = useState<InterdiffResponse | null>(null);
-  // Marking a hunk reviewed moves the server's "last reviewed head" to the current head, which
-  // would end the re-review mid-session. The banner (and its default) stays until reload.
-  const [latched, setLatched] = useState<InterdiffResponse | null>(null);
   const [hideChoice, setHideChoice] = useState<boolean | null>(null);
   const [errorState, setErrorState] = useState<{ message: string; needsRefresh: boolean } | null>(
     null,
@@ -139,8 +138,7 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
     );
   }, [setError]);
 
-  const reloadInterdiff = useCallback(async (reset?: boolean) => {
-    if (reset) setLatched(null);
+  const reloadInterdiff = useCallback(async () => {
     try {
       setInterdiff(await api<InterdiffResponse>('/api/interdiff'));
     } catch {
@@ -239,11 +237,20 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
     [setError],
   );
 
-  useEffect(() => {
-    if (interdiff && reReviewInfo(interdiff)) setLatched(interdiff);
-  }, [interdiff]);
-  const banner = latched ?? interdiff;
-  const reReview = useMemo(() => reReviewInfo(banner), [banner]);
+  const markDoneReviewing = useCallback(async () => {
+    try {
+      await api('/api/review-checkpoint', {
+        method: 'POST',
+        ...jsonBody({ headSha: pr.headSha, diffHash }),
+      });
+    } catch (err) {
+      setErrorState(describeReviewedError(err));
+      return;
+    }
+    await reloadInterdiff();
+  }, [pr.headSha, diffHash, reloadInterdiff]);
+
+  const reReview = useMemo(() => reReviewInfo(interdiff), [interdiff]);
   const hideReviewed = effectiveHideReviewed(hideChoice, reReview);
   const dismissError = useCallback(() => setErrorState(null), []);
 
@@ -258,12 +265,13 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
       setHunks,
       verifyChecked,
       toggleVerify,
-      interdiff: banner,
+      interdiff,
       reReview,
       hideReviewed,
       setHideReviewed: setHideChoice,
       checkHead,
       reloadInterdiff,
+      markDoneReviewing,
       error,
       errorNeedsRefresh: errorState?.needsRefresh ?? false,
       dismissError,
@@ -278,11 +286,12 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
       setHunks,
       verifyChecked,
       toggleVerify,
-      banner,
+      interdiff,
       reReview,
       hideReviewed,
       checkHead,
       reloadInterdiff,
+      markDoneReviewing,
       error,
       errorState,
       dismissError,
