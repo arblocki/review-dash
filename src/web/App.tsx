@@ -24,7 +24,7 @@ function Review() {
   const [submitting, setSubmitting] = useState(false);
   const [choice, setChoice] = useState<ViewMode | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  // Verify checks are local for now; ids are `verifyId(groupKey, index)` so they can be persisted.
+  // Verify checks are local for now; ids are `verifyId(groupKey, index, text)` so they can be persisted.
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
 
   const analysis = result?.analysis;

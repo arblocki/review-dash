@@ -5,6 +5,7 @@ import {
   describeAnalysisError,
   formatDuration,
   groupNeighbors,
+  hash8,
   groupOptionLabel,
   groupByKey,
   hunkToGroup,
@@ -106,7 +107,7 @@ describe('selectors', () => {
     expect(pickGroup([], null)).toBeUndefined();
   });
   it('builds verify ids and counts known hunks', () => {
-    expect(verifyId('k', 2)).toBe('k:2');
+    expect(verifyId('k', 2, 'check it')).toMatch(/^k:2:[0-9a-f]{8}$/);
     const hunks = [{ id: 'h1' }, { id: 'h2' }] as Hunk[];
     expect(countKnownHunks(groups[0]!, hunks)).toBe(2);
     expect(countKnownHunks(groups[1]!, hunks)).toBe(1);
@@ -178,5 +179,25 @@ describe('railCount / groupOptionLabel', () => {
     expect(groupOptionLabel(g('a', { title: 'Auth', risk: 'high', hunkIds: ['1', '2'] }))).toBe(
       'HIGH · Auth (2)',
     );
+  });
+});
+
+describe('verifyId', () => {
+  it('is the same for the same group, index and text', () => {
+    expect(verifyId('k', 0, 'check a')).toBe(verifyId('k', 0, 'check a'));
+  });
+
+  it('differs when the text at the same index changes', () => {
+    expect(verifyId('k', 0, 'check a')).not.toBe(verifyId('k', 0, 'check b'));
+  });
+
+  it('differs by index and group for the same text', () => {
+    expect(verifyId('k', 0, 'x')).not.toBe(verifyId('k', 1, 'x'));
+    expect(verifyId('k', 0, 'x')).not.toBe(verifyId('j', 0, 'x'));
+  });
+
+  it('uses FNV-1a (known vectors)', () => {
+    expect(hash8('')).toBe('811c9dc5');
+    expect(hash8('a')).toBe('e40c292c');
   });
 });

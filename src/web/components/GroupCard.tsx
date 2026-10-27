@@ -32,7 +32,7 @@ export function GroupCard({
   allGroups: AnalysisGroup[];
   /** Position and prev/next keys in the displayed order, for the narrow-screen buttons. */
   neighbors: GroupNeighbors;
-  /** Checked verify items, by `verifyId(group.key, index)`. */
+  /** Checked verify items, by `verifyId(group.key, index, text)`. */
   checked: ReadonlySet<string>;
   onToggleVerify(id: string): void;
   onSelect(key: string): void;
@@ -100,7 +100,7 @@ export function GroupCard({
             <div className="font-semibold">Verify</div>
             <ul className="space-y-0.5">
               {group.verify.map((v, i) => {
-                const id = verifyId(group.key, i);
+                const id = verifyId(group.key, i, v);
                 return (
                   <li key={id}>
                     <label className="flex items-start gap-2">

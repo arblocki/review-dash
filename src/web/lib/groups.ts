@@ -96,9 +96,22 @@ export function groupOptionLabel(
   return `${riskBadge(g).label} · ${g.title} (${railCount(g)})`;
 }
 
-/** Stable id for one verify checkbox; the reviewed-state layer can persist on this. */
-export function verifyId(groupKey: string, index: number): string {
-  return `${groupKey}:${index}`;
+/** FNV-1a (32-bit) of a string as 8 hex chars; deterministic and non-cryptographic. */
+export function hash8(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * Stable id for one verify checkbox: `${groupKey}:${index}:${hash8(text)}`. The text hash means a
+ * checkmark does not carry over to a different item when a re-analysis changes the checklist.
+ */
+export function verifyId(groupKey: string, index: number, text: string): string {
+  return `${groupKey}:${index}:${hash8(text)}`;
 }
 
 /** Number of hunks that actually exist in the PR (stale ids are ignored). */
