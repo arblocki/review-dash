@@ -1,10 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { useDraftCount, useReview } from '../state';
 
 const btn =
   'rounded border border-gray-300 bg-white px-2.5 py-1 text-sm hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800';
 
-export function Header({ onSubmit }: { onSubmit: () => void }) {
+export function Header({ onSubmit, extra }: { onSubmit: () => void; extra?: ReactNode }) {
   const {
     session,
     pr,
@@ -151,6 +151,7 @@ export function Header({ onSubmit }: { onSubmit: () => void }) {
           </button>
         </div>
       </div>
+      {extra}
     </div>
   );
 }

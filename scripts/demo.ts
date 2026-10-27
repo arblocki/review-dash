@@ -3,6 +3,7 @@
  * so the UI can be tried or smoke-tested without a token. Not part of the shipped CLI.
  *
  *   pnpm demo [--port 5175] [--self]     (--self: viewer is the PR author)
+ *   kill -USR2 <pid>                      simulate a push; Refresh in the UI shows it
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -11,6 +12,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { RawFile } from '../src/core/diff/types.js';
 import type { ReviewThread } from '../src/core/github/types.js';
+import { configSchema } from '../src/core/llm/config.js';
+import { FakeProvider } from '../src/core/llm/fake.js';
 import { openStore } from '../src/core/store/index.js';
 import { fakeGitHub, loadFixture, type FakeGitHub } from '../src/core/testing/fakes.testutil.js';
 import { startServer, type RunningServer } from '../src/server/index.js';
@@ -46,6 +49,11 @@ const GREET_NEW = GREET_OLD.replace(
 const UTIL_OLD = 'def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n';
 const UTIL_NEW =
   'def add(a, b):\n    """Add."""\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n\n\ndef mul(a, b):\n    return a * b\n';
+
+const TEST_OLD =
+  "import { greet } from '../src/greet';\n\ntest('greets', () => {\n  expect(greet('a')).toBe('Hello a');\n});\n";
+const TEST_NEW =
+  TEST_OLD + "\ntest('greets twice', () => {\n  expect(greet('b')).toBe('Hello b');\n});\n";
 
 const README_OLD = numbered(30, (i) => `Line ${i} of the readme`);
 const README_NEW = README_OLD.replace(
@@ -92,7 +100,56 @@ export interface Demo {
   server: RunningServer;
   url: string;
   github: FakeGitHub;
+  /** Simulates a push: new head sha and a changed greet.ts hunk, picked up by the next Refresh. */
+  moveHead(): void;
   close(): Promise<void>;
+}
+
+/** Canned grouping so the demo shows real groups without an LLM: one group per source area. */
+function demoGrouping(prompt: string): string {
+  const hunks = [...prompt.matchAll(/## hunk (\S+)\npath: (\S+)/g)].map((m) => ({
+    id: m[1]!,
+    path: m[2]!,
+  }));
+  const ids = (re: RegExp) => hunks.filter((h) => re.test(h.path)).map((h) => h.id);
+  const groups = [
+    {
+      title: 'Greeting prefix and retry constant',
+      intent: 'Makes the greeting prefix a variable and adds a retries export.',
+      kind: 'feature',
+      risk: 'high',
+      risk_reasons: ['Changes the public greet() output path', 'New exported constant'],
+      verify: ['greet() output is unchanged for existing callers', 'retries is not shadowed'],
+      hunk_ids: ids(/^src\/greet\.ts$/),
+      depends_on: [1],
+    },
+    {
+      title: 'Math helpers',
+      intent: 'Documents add() and introduces mul().',
+      kind: 'feature',
+      risk: 'low',
+      risk_reasons: [],
+      verify: ['mul() has the same signature style as add()'],
+      hunk_ids: ids(/^src\/util\.py$/),
+      depends_on: [],
+    },
+    {
+      title: 'Tests for greet',
+      intent: 'Adds a second greet test.',
+      kind: 'test',
+      risk: 'low',
+      risk_reasons: [],
+      verify: [],
+      hunk_ids: ids(/^tests\//),
+      depends_on: [0],
+    },
+  ].filter((g) => g.hunk_ids.length > 0);
+  return JSON.stringify({
+    summary:
+      'Refactors greet() to use a prefix variable, adds a retries constant and a mul() helper, and extends the tests.',
+    groups,
+    unrelated_or_suspicious: ['README.md whitespace edits look unrelated to the code changes.'],
+  });
 }
 
 export async function startDemo(opts: { port?: number; self?: boolean } = {}): Promise<Demo> {
@@ -101,6 +158,7 @@ export async function startDemo(opts: { port?: number; self?: boolean } = {}): P
     'src/greet.ts': [GREET_OLD, GREET_NEW],
     'src/util.py': [UTIL_OLD, UTIL_NEW],
     'README.md': [README_OLD, README_NEW],
+    'tests/greet.test.ts': [TEST_OLD, TEST_NEW],
   };
   const files: RawFile[] = [
     ...Object.entries(contents).map(([p, [o, n]]) => file(p, o, n)),
@@ -161,10 +219,26 @@ export async function startDemo(opts: { port?: number; self?: boolean } = {}): P
     port: opts.port ?? 0,
     github,
     store: openStore(':memory:'),
+    analysis: {
+      config: configSchema.parse({ provider: 'openrouter' }),
+      createProvider: () =>
+        new FakeProvider(
+          Array.from({ length: 50 }, () => (req) => demoGrouping(req.prompt)),
+          'fake',
+        ),
+    },
   });
+  let moves = 0;
+  const moveHead = () => {
+    moves++;
+    const idx = files.findIndex((f) => f.filename === 'src/greet.ts');
+    files[idx] = file('src/greet.ts', GREET_OLD, GREET_NEW.replace("'Hello'", `'Hello${moves}'`));
+    github.setHead(String(moves).repeat(40).slice(0, 40));
+  };
   return {
     server,
     github,
+    moveHead,
     url: `http://127.0.0.1:${server.port}/#token=${server.token}`,
     close: server.close,
   };
@@ -177,5 +251,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     self: process.argv.includes('--self'),
   });
   console.log(`Demo (fake GitHub): ${demo.url}`);
+  // Smoke tests: `kill -USR2 <pid>` simulates a push; click Refresh in the UI to pick it up.
+  process.on('SIGUSR2', () => demo.moveHead());
   process.on('SIGINT', () => void demo.close().then(() => process.exit(0)));
 }

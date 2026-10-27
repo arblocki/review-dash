@@ -63,10 +63,13 @@ export function FileDiff({
   file,
   hunks = file.hunks,
   anchorId,
+  showFileThreads = true,
 }: {
   file: ParsedFile;
   hunks?: Hunk[];
   anchorId?: string;
+  /** Render the file-level Discussion; false where another group card owns it. */
+  showFileThreads?: boolean;
 }) {
   const { pr, hideWhitespace, threads } = useReview();
   const [collapsed, setCollapsed] = useState(false);
@@ -97,7 +100,17 @@ export function FileDiff({
       </Placeholder>
     );
   } else if (hunks.length === 0) {
-    body = <Placeholder>No content changes (rename or mode change only).</Placeholder>;
+    body =
+      (file.status === 'renamed' || file.status === 'copied') &&
+      file.oldPath &&
+      file.oldPath !== file.path ? (
+        <Placeholder>
+          {file.status === 'renamed' ? 'Renamed' : 'Copied'} from{' '}
+          <code className="font-mono">{file.oldPath}</code> — no content changes.
+        </Placeholder>
+      ) : (
+        <Placeholder>No content changes (rename or mode change only).</Placeholder>
+      );
   } else if (shown.length === 0) {
     body = <Placeholder>Only whitespace changes (hidden).</Placeholder>;
   } else {
@@ -143,7 +156,7 @@ export function FileDiff({
           <span className="text-red-700 dark:text-red-400">−{file.deletions}</span>
         </span>
       </div>
-      {!collapsed && placement.fileLevel.length > 0 && (
+      {!collapsed && showFileThreads && placement.fileLevel.length > 0 && (
         <div
           className="border-b border-gray-200 bg-gray-50/50 py-1 dark:border-gray-800 dark:bg-gray-900/40"
           data-testid="file-discussion"
