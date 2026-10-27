@@ -104,7 +104,8 @@ describe('applyRisk', () => {
     );
     const map = new Map(hunks.map((h) => [h.hunk.id, h]));
     const ids = hunks.map((h) => h.hunk.id);
-    expect(applyRisk(draft([ids[0]!, ids[1]!]), map).autoClear).toBe(true);
+    expect(applyRisk(draft([ids[0]!, ids[1]!]), map).autoClear).toBe(false); // comment-only
+    expect(applyRisk(draft([ids[0]!]), map).autoClear).toBe(true);
     expect(applyRisk(draft([ids[0]!, ids[2]!]), map).autoClear).toBe(false);
     expect(applyRisk(draft([ids[0]!], { risk: 'medium' }), map).autoClear).toBe(false);
     expect(applyRisk(draft([ids[3]!]), map).autoClear).toBe(true);

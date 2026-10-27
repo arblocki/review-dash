@@ -30,7 +30,7 @@ const FILES: ParsedFile[] = [
   mkFile('docs/guide.md', ['+hello']),
   mkFile('package.json', ['+"dep": "1"']),
   mkFile('package-lock.json', ['+lock']),
-  mkFile('src/gen.ts', ['-  a b', '+a b']),
+  mkFile('dist/gen.js', ['-  a b', '+a b']),
   mkFile('README.md', ['+x']),
 ];
 
@@ -76,7 +76,7 @@ describe('UnionFind / preGroup', () => {
     const byPaths = clusters.map((c) => c.paths);
     expect(byPaths).toContainEqual(['src/send.ts', 'src/send.test.ts']);
     expect(byPaths.flat()).not.toContain('package-lock.json');
-    expect(byPaths.flat()).not.toContain('src/gen.ts'); // whitespace-only
+    expect(byPaths.flat()).not.toContain('dist/gen.js'); // generated
     const send = clusters.find((c) => c.paths.includes('src/send.ts'))!;
     expect(send.hunkIds).toHaveLength(3);
     expect(clusters.map((c) => c.id)).toEqual(clusters.map((_, i) => `c${i + 1}`));
@@ -678,5 +678,44 @@ describe('lockfile handling', () => {
     expect(find(cargo, LOCKFILE_TITLE)).toBeUndefined();
     const goSum = run([mkFile('main.go', ['+x']), mkFile('go.sum', ['+a v1 h1:x'])]);
     expect(find(goSum, LOCKFILE_TITLE)!.riskReasons[0]).toContain('go.mod');
+  });
+});
+
+describe('whitespace-only and comment-only hunks are never auto-cleared', () => {
+  const run = (files: ParsedFile[]) => {
+    const c = classifyFiles(files);
+    const r = validateGrouping(
+      undefined,
+      c,
+      files.map((f) => f.path),
+    );
+    const map = new Map(c.map((h) => [h.hunk.id, h]));
+    return { c, groups: r.groups.map((g) => applyRisk(g, map)) };
+  };
+
+  it('does not treat a template-literal re-indent as mechanical', () => {
+    const { c, groups } = run([
+      mkFile('src/s.ts', [
+        '-const s = `',
+        '-  a',
+        '-  b',
+        '-`;',
+        '+const s = `',
+        '+    a',
+        '+    b',
+        '+`;',
+      ]),
+    ]);
+    expect(c[0]!.tags).toContain('whitespace-only');
+    expect(c[0]!.mechanical).toBe(false);
+    expect(groups.some((g) => g.title === MECHANICAL_TITLE)).toBe(false);
+    expect(groups.every((g) => !g.autoClear)).toBe(true);
+  });
+
+  it('does not auto-clear a hunk where only a comment line changed', () => {
+    const { c, groups } = run([mkFile('src/a.js', ['-// old note', '+// new note'])]);
+    expect(c[0]!.tags).toContain('comment-only');
+    expect(c[0]!.mechanical).toBe(false);
+    expect(groups.every((g) => !g.autoClear)).toBe(true);
   });
 });

@@ -134,7 +134,9 @@ Tag each file and hunk using path globs and content checks:
 - `test`, `docs`, `config`, `ci` (`.github/workflows/**`), `migration`, `deps` (manifest
   changes)
 - `rename-only` (100% similarity), `whitespace-only` (empty when diffed with whitespace
-  ignored), `comment-only`
+  ignored), `comment-only`. The last two are hints for the LLM and UI only; they are never
+  mechanical or auto-cleared, because line-based checks can't see string context (indentation
+  and `// note` lines inside a template literal or heredoc are part of the value).
 - Test↔implementation pairing by name (`foo.ts` ↔ `foo.test.ts`, `x.py` ↔ `test_x.py`)
 
 Lockfiles, generated files, snapshots, vendored code, and rename-only changes skip the LLM
@@ -203,8 +205,8 @@ Final risk is the higher of the LLM's rating and the rule-based rating:
   manifests, infra (`Dockerfile`, `*.tf`), large deletions, changes to public API exports.
 - Per-repo rules: `.review-dash.yaml` in the reviewed repo (globs and regexes mapped to a
   risk level and a reason), the same idea as `REVIEW.md`.
-- The low end is Antique-style **auto-clear**: groups that are all mechanical, docs,
-  comments, or whitespace start collapsed and pre-marked as reviewed. Start strict and
+- The low end is Antique-style **auto-clear**: groups that are all mechanical or docs
+  (whitespace-only and comment-only hunks are tagged but never auto-cleared, see 4.2) start collapsed and pre-marked as reviewed. Start strict and
   loosen later. Lockfile hunks count as mechanical only under the 4.2 conditions (manifest
   changed too, no integrity/source change for an unchanged version); otherwise they are in
   the "Lockfile changes — verify" group and are not auto-cleared.

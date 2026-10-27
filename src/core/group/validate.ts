@@ -211,7 +211,7 @@ export function mechanicalGroup(
   if (ids.length === 0 && files.length === 0) return undefined;
   return {
     title: MECHANICAL_TITLE,
-    intent: 'Generated code, snapshots, vendored code, renames and whitespace-only edits.',
+    intent: 'Generated code, snapshots, vendored code, renames.',
     kind: 'mechanical',
     risk: 'low',
     riskReasons: [],
@@ -240,7 +240,7 @@ function flaggedMechanicalGroup(
   return {
     title: MECHANICAL_FLAGGED_TITLE,
     intent:
-      'Generated, vendored, renamed or whitespace-only changes in files that risk rules cover. Look at these before trusting the label.',
+      'Generated, vendored or renamed changes in files that risk rules cover. Look at these before trusting the label.',
     kind: 'mechanical',
     risk,
     riskReasons,

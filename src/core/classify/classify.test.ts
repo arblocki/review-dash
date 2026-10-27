@@ -100,7 +100,8 @@ describe('hunk tags', () => {
       mkFile('src/b.ts', ['-a b  ', '+a b']),
       mkFile('src/c.ts', ['+// c']),
     ]);
-    expect(hunks.map((h) => h.mechanical)).toEqual([true, false, true, false]);
+    expect(hunks.map((h) => h.mechanical)).toEqual([true, false, false, false]);
+    expect(hunks[2]!.tags).toContain('whitespace-only'); // tagged, but not mechanical
     expect(hunks[3]!.tags).toContain('comment-only');
     expect(isMechanical(['docs'])).toBe(false);
     expect(isMechanical(['snapshot'])).toBe(true);
