@@ -1,14 +1,6 @@
-import { itemCounts } from '../lib/groups';
+import { itemCounts, railCount } from '../lib/groups';
 import type { AnalysisGroup } from '../types';
 import { RiskBadge } from './RiskBadge';
-
-/** Compact count: "3", "3 · 2f", or "2f" when the group only has hunkless files. */
-function railCount(g: AnalysisGroup): string {
-  const h = g.hunkIds.length;
-  const f = g.files.length;
-  if (f === 0) return String(h);
-  return h === 0 ? `${f}f` : `${h} · ${f}f`;
-}
 
 /**
  * Left rail for the grouped views: one row per group. The `trailing` cell is where per-group

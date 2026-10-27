@@ -45,6 +45,33 @@ export function pickGroup(groups: AnalysisGroup[], key: string | null): Analysis
   return groups.find((g) => g.key === key) ?? groups[0];
 }
 
+export interface GroupNeighbors {
+  prev: string | undefined;
+  next: string | undefined;
+  /** 1-based position in display order, and the group count. */
+  position: number;
+  total: number;
+}
+
+/** Keys of the groups before and after `key` in display order (for prev/next buttons). */
+export function groupNeighbors(groups: Pick<AnalysisGroup, 'key'>[], key: string): GroupNeighbors {
+  const i = groups.findIndex((g) => g.key === key);
+  return {
+    prev: i > 0 ? groups[i - 1]!.key : undefined,
+    next: i >= 0 && i < groups.length - 1 ? groups[i + 1]!.key : undefined,
+    position: i + 1,
+    total: groups.length,
+  };
+}
+
+/** Compact count: "3", "3 · 2f", or "2f" when the group only has hunkless files. */
+export function railCount(g: Pick<AnalysisGroup, 'hunkIds' | 'files'>): string {
+  const h = g.hunkIds.length;
+  const f = g.files.length;
+  if (f === 0) return String(h);
+  return h === 0 ? `${f}f` : `${h} · ${f}f`;
+}
+
 export type BadgeTone = 'high' | 'medium' | 'low' | 'auto' | 'unclassified';
 
 export interface RiskBadgeInfo {
@@ -60,6 +87,13 @@ export function riskBadge(
   if (g.risk === 'high') return { label: 'HIGH', tone: 'high' };
   if (g.risk === 'medium') return { label: 'MED', tone: 'medium' };
   return { label: 'LOW', tone: 'low' };
+}
+
+/** One line for the narrow-screen group selector: risk badge, title and count. */
+export function groupOptionLabel(
+  g: Pick<AnalysisGroup, 'risk' | 'autoClear' | 'unclassified' | 'title' | 'hunkIds' | 'files'>,
+): string {
+  return `${riskBadge(g).label} · ${g.title} (${railCount(g)})`;
 }
 
 /** Stable id for one verify checkbox; the reviewed-state layer can persist on this. */

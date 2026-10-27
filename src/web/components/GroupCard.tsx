@@ -1,10 +1,19 @@
 import { useMemo, useState } from 'react';
-import { groupByKey, isFilesWithoutDiff, itemCounts, verifyId } from '../lib/groups';
+import {
+  groupByKey,
+  isFilesWithoutDiff,
+  itemCounts,
+  verifyId,
+  type GroupNeighbors,
+} from '../lib/groups';
 import { sectionsForGroup } from '../lib/sections';
 import { useReview } from '../state';
 import type { AnalysisGroup } from '../types';
 import { HunkList } from './HunkList';
 import { RiskBadge } from './RiskBadge';
+
+const stepBtn =
+  'rounded border border-gray-300 bg-white px-2 py-0.5 text-sm hover:bg-gray-50 disabled:opacity-40 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800';
 
 /**
  * Main-pane card for one group. Mount with `key={group.key}` so collapse state resets per group.
@@ -14,12 +23,15 @@ import { RiskBadge } from './RiskBadge';
 export function GroupCard({
   group,
   allGroups,
+  neighbors,
   checked,
   onToggleVerify,
   onSelect,
 }: {
   group: AnalysisGroup;
   allGroups: AnalysisGroup[];
+  /** Position and prev/next keys in the displayed order, for the narrow-screen buttons. */
+  neighbors: GroupNeighbors;
   /** Checked verify items, by `verifyId(group.key, index)`. */
   checked: ReadonlySet<string>;
   onToggleVerify(id: string): void;
@@ -38,11 +50,34 @@ export function GroupCard({
       <div className="rounded border border-gray-200 p-4 dark:border-gray-800">
         <div className="flex flex-wrap items-center gap-2">
           <RiskBadge group={group} />
-          <h2 className="min-w-0 flex-1 text-lg font-semibold">{group.title}</h2>
+          <h2 className="min-w-[12rem] flex-1 text-lg font-semibold">{group.title}</h2>
           <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
             {group.kind}
           </span>
           <span className="text-xs text-gray-500 dark:text-gray-400">{itemCounts(group)}</span>
+          <div className="flex items-center gap-1 md:hidden" data-testid="group-stepper">
+            <button
+              type="button"
+              aria-label="Previous group"
+              disabled={!neighbors.prev}
+              onClick={() => neighbors.prev && onSelect(neighbors.prev)}
+              className={stepBtn}
+            >
+              ‹
+            </button>
+            <span className="text-xs text-gray-500 tabular-nums dark:text-gray-400">
+              {neighbors.position}/{neighbors.total}
+            </span>
+            <button
+              type="button"
+              aria-label="Next group"
+              disabled={!neighbors.next}
+              onClick={() => neighbors.next && onSelect(neighbors.next)}
+              className={stepBtn}
+            >
+              ›
+            </button>
+          </div>
         </div>
         {group.intent && (
           <p className="mt-2 text-sm">

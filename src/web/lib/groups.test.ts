@@ -4,12 +4,15 @@ import {
   countKnownHunks,
   describeAnalysisError,
   formatDuration,
+  groupNeighbors,
+  groupOptionLabel,
   groupByKey,
   hunkToGroup,
   isFilesWithoutDiff,
   itemCounts,
   orderGroups,
   pickGroup,
+  railCount,
   resolveView,
   riskBadge,
   usageParts,
@@ -143,5 +146,37 @@ describe('resolveView', () => {
   it('forces By file while the analysis is stale, whatever the choice', () => {
     expect(resolveView(null, true, true)).toBe('file');
     expect(resolveView('group', true, true)).toBe('file');
+  });
+});
+
+describe('groupNeighbors', () => {
+  const groups = [g('a'), g('b'), g('c')];
+  it('gives prev/next and the position in display order', () => {
+    expect(groupNeighbors(groups, 'a')).toEqual({
+      prev: undefined,
+      next: 'b',
+      position: 1,
+      total: 3,
+    });
+    expect(groupNeighbors(groups, 'b')).toMatchObject({ prev: 'a', next: 'c', position: 2 });
+    expect(groupNeighbors(groups, 'c')).toMatchObject({ prev: 'b', next: undefined, position: 3 });
+  });
+
+  it('has no neighbours for an unknown key', () => {
+    expect(groupNeighbors(groups, 'x')).toMatchObject({ prev: undefined, next: undefined });
+  });
+});
+
+describe('railCount / groupOptionLabel', () => {
+  it('formats hunk and file counts compactly', () => {
+    expect(railCount(g('a', { hunkIds: ['1', '2', '3'] }))).toBe('3');
+    expect(railCount(g('a', { hunkIds: ['1'], files: ['x'] }))).toBe('1 · 1f');
+    expect(railCount(g('a', { files: ['x', 'y'] }))).toBe('2f');
+  });
+
+  it('puts the risk badge, title and count in one line', () => {
+    expect(groupOptionLabel(g('a', { title: 'Auth', risk: 'high', hunkIds: ['1', '2'] }))).toBe(
+      'HIGH · Auth (2)',
+    );
   });
 });

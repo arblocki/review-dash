@@ -4,12 +4,13 @@ import { AnalysisBar } from './components/AnalysisBar';
 import { AnalysisBanner, AnalysisError, AnalysisSkeleton } from './components/AnalysisStatus';
 import { FileList } from './components/FileList';
 import { GroupCard } from './components/GroupCard';
+import { GroupPicker } from './components/GroupPicker';
 import { GroupRail } from './components/GroupRail';
 import { AllFilesDiff } from './components/HunkList';
 import { Header } from './components/Header';
 import { Layout } from './components/Layout';
 import { SubmitModal } from './components/SubmitModal';
-import { orderGroups, pickGroup, resolveView, type ViewMode } from './lib/groups';
+import { groupNeighbors, orderGroups, pickGroup, resolveView, type ViewMode } from './lib/groups';
 import { ReviewProvider, useReview } from './state';
 
 function Review() {
@@ -58,10 +59,12 @@ function Review() {
     main = (
       <>
         {error && !loading && <AnalysisError view={view} onView={setChoice} />}
+        <GroupPicker groups={groups} selectedKey={group.key} onSelect={select} />
         <GroupCard
           key={group.key}
           group={group}
           allGroups={analysis.groups}
+          neighbors={groupNeighbors(groups, group.key)}
           checked={checked}
           onToggleVerify={toggleVerify}
           onSelect={select}
