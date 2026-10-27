@@ -1,4 +1,7 @@
+import { useMemo } from 'react';
 import { groupOptionLabel } from '../lib/groups';
+import { groupProgress } from '../lib/progress';
+import { useReviewState } from '../reviewState';
 import type { AnalysisGroup } from '../types';
 
 /**
@@ -14,6 +17,11 @@ export function GroupPicker({
   selectedKey: string | undefined;
   onSelect(key: string): void;
 }) {
+  const { knownItemIds, fileKeys, status } = useReviewState();
+  const progress = useMemo(
+    () => groupProgress(groups, fileKeys, knownItemIds, status),
+    [groups, fileKeys, knownItemIds, status],
+  );
   if (groups.length === 0) return null;
   return (
     <label className="mb-3 flex items-center gap-2 text-sm md:hidden">
@@ -26,7 +34,7 @@ export function GroupPicker({
       >
         {groups.map((g) => (
           <option key={g.key} value={g.key}>
-            {groupOptionLabel(g)}
+            {groupOptionLabel(g, progress.get(g.key))}
           </option>
         ))}
       </select>

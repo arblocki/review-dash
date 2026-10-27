@@ -10,7 +10,7 @@ import {
 } from 'react';
 import { useAnalysis } from './analysis';
 import { api, jsonBody } from './api';
-import { parseVerifyId, verifyId } from './lib/groups';
+import { verifyIdsFromWire, verifyWireArgs } from './lib/groups';
 import { filterSections } from './lib/reviewFilter';
 import { allItemIds, fileKeyMap } from './lib/reviewItems';
 import type { DiffSection } from './lib/sections';
@@ -26,6 +26,8 @@ export interface ReviewStateValue {
   knownItemIds: ReadonlySet<string>;
   /** path -> review-item key, for files without hunks. */
   fileKeys: ReadonlyMap<string, string>;
+  /** The loaded analysis is for an older PR version: auto-clear is paused until it is replaced. */
+  analysisStale: boolean;
   status(id: string): HunkStatus;
   /** Checks or unchecks one hunk. Checking an auto-cleared hunk stores real reviewed state. */
   toggleHunk(id: string): void;
@@ -78,7 +80,7 @@ function saveSet(key: string, set: ReadonlySet<string>): void {
 
 export function ReviewStateProvider({ children }: { children: ReactNode }) {
   const { session, files, pr } = useReview();
-  const { result } = useAnalysis();
+  const { result, stale } = useAnalysis();
   const [reviewed, setReviewedState] = useState<ReadonlySet<string>>(new Set());
   const [verifyChecked, setVerifyChecked] = useState<ReadonlySet<string>>(new Set());
   const [interdiff, setInterdiff] = useState<InterdiffResponse | null>(null);
@@ -105,8 +107,9 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
   const fileKeys = useMemo(() => fileKeyMap(files, pr.headSha), [files, pr.headSha]);
   const knownItemIds = useMemo(() => allItemIds(files, pr.headSha), [files, pr.headSha]);
   const auto = useMemo(
-    () => (result ? autoClearIds(result.analysis.groups, fileKeys) : new Set<string>()),
-    [result, fileKeys],
+    // A stale analysis describes an older diff: it must not auto-clear hunks of this one.
+    () => (result && !stale ? autoClearIds(result.analysis.groups, fileKeys) : new Set<string>()),
+    [result, stale, fileKeys],
   );
   const autoRef = useRef(auto);
   autoRef.current = auto;
@@ -116,15 +119,7 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
       (s) => {
         // Local edits made before this arrived win.
         setReviewedState((cur) => new Set([...s.reviewedHunkIds, ...cur]));
-        setVerifyChecked(
-          (cur) =>
-            new Set([
-              ...Object.entries(s.verifyChecks).flatMap(([k, idx]) =>
-                idx.map((i) => verifyId(k, i, '')),
-              ),
-              ...cur,
-            ]),
-        );
+        setVerifyChecked((cur) => new Set([...verifyIdsFromWire(s.verifyChecks), ...cur]));
       },
       (err: unknown) => setError(`Could not load reviewed state: ${(err as Error).message}`),
     );
@@ -202,8 +197,8 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
   );
 
   const toggleVerify = useCallback((id: string) => {
-    const parsed = parseVerifyId(id);
-    if (!parsed) return;
+    const wire = verifyWireArgs(id);
+    if (!wire) return;
     const prev = verifyRef.current;
     const checked = !prev.has(id);
     setVerifyChecked((cur) => {
@@ -214,7 +209,7 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
     });
     api('/api/verify', {
       method: 'PUT',
-      ...jsonBody({ groupKey: parsed.groupKey, itemIndex: parsed.index, checked }),
+      ...jsonBody({ ...wire, checked }),
     }).catch((err: unknown) => {
       setVerifyChecked((cur) => {
         const next = new Set(cur);
@@ -239,6 +234,7 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
       reviewed,
       knownItemIds,
       fileKeys,
+      analysisStale: stale,
       status,
       toggleHunk,
       setHunks,
@@ -257,6 +253,7 @@ export function ReviewStateProvider({ children }: { children: ReactNode }) {
       reviewed,
       knownItemIds,
       fileKeys,
+      stale,
       status,
       toggleHunk,
       setHunks,

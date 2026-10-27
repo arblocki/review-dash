@@ -19,6 +19,8 @@ import {
   riskBadge,
   usageParts,
   verifyId,
+  verifyIdsFromWire,
+  verifyWireArgs,
 } from './groups';
 
 const g = (key: string, extra: Partial<AnalysisGroup> = {}): AnalysisGroup => ({
@@ -210,5 +212,56 @@ describe('parseVerifyId', () => {
     expect(parsed).toEqual({ groupKey: 'a:b', index: 3, hash: hash8('text') });
     expect(parseVerifyId('nope')).toBeNull();
     expect(parseVerifyId('k:x:abcd1234')).toBeNull();
+  });
+});
+
+describe('persisted verify checks', () => {
+  /** What the server would hand back after the user checked these ids. */
+  const roundTrip = (ids: string[]): Set<string> => {
+    const stored: Record<string, number[]> = {};
+    for (const id of ids) {
+      const w = verifyWireArgs(id)!;
+      (stored[w.groupKey] ??= []).push(w.itemIndex);
+    }
+    return new Set(verifyIdsFromWire(stored));
+  };
+
+  it('keeps an unchanged item checked across a reload or re-analysis', () => {
+    const checked = roundTrip([verifyId('a:b', 0, 'run tests'), verifyId('a:b', 2, 'check auth')]);
+    expect(checked.has(verifyId('a:b', 0, 'run tests'))).toBe(true);
+    expect(checked.has(verifyId('a:b', 2, 'check auth'))).toBe(true);
+    expect(checked.size).toBe(2);
+  });
+
+  it('shows an item unchecked when its text changed at the same index', () => {
+    const checked = roundTrip([verifyId('g', 1, 'old text')]);
+    expect(checked.has(verifyId('g', 1, 'new text'))).toBe(false);
+  });
+
+  it('puts the text hash in the stored group key and leaves the index alone', () => {
+    expect(verifyWireArgs(verifyId('g', 4, 'x'))).toEqual({
+      groupKey: `g#${hash8('x')}`,
+      itemIndex: 4,
+    });
+    expect(verifyWireArgs('garbage')).toBeNull();
+  });
+
+  it('ignores legacy entries stored without a text hash', () => {
+    expect(verifyIdsFromWire({ g: [0, 1], [`h#${hash8('x')}`]: [3] })).toEqual([
+      `h:3:${hash8('x')}`,
+    ]);
+  });
+});
+
+describe('groupOptionLabel with progress', () => {
+  const grp = g('a', { title: 'Auth', risk: 'high', hunkIds: ['1', '2'] });
+  it('shows done/total while incomplete', () => {
+    expect(groupOptionLabel(grp, { done: 1, total: 2, complete: false })).toBe('HIGH · Auth (1/2)');
+  });
+  it('shows a check and the count once complete', () => {
+    expect(groupOptionLabel(grp, { done: 2, total: 2, complete: true })).toBe('✓ HIGH · Auth (2)');
+  });
+  it('does not claim a check for an empty group', () => {
+    expect(groupOptionLabel(grp, { done: 0, total: 0, complete: true })).toBe('HIGH · Auth (0/0)');
   });
 });

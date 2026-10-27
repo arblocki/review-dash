@@ -10,7 +10,6 @@ const g = (key: string, hunkIds: string[], extra: Partial<AnalysisGroup> = {}): 
   risk: 'low',
   riskReasons: [],
   verify: [],
-  files: [],
   hunkIds,
   files: [],
   dependsOn: [],

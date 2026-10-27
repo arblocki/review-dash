@@ -4,7 +4,7 @@ import { useReviewState } from '../reviewState';
 
 /** Overall progress: share of the PR's hunks and hunkless files that are reviewed or auto-cleared. */
 export function ProgressBar() {
-  const { knownItemIds, status } = useReviewState();
+  const { knownItemIds, status, analysisStale } = useReviewState();
   const p = useMemo(() => progressFor(knownItemIds, status), [knownItemIds, status]);
   const hasFiles = [...knownItemIds].some((id) => id.startsWith('file:'));
   return (
@@ -42,6 +42,11 @@ export function ProgressBar() {
         {p.auto > 0 ? ` + ${p.auto} auto-cleared` : ''} of {p.total}{' '}
         {hasFiles ? 'items' : p.total === 1 ? 'hunk' : 'hunks'}
       </p>
+      {analysisStale && (
+        <p className="mt-1 text-amber-700 dark:text-amber-300" data-testid="progress-stale">
+          Analysis is out of date: auto-clear is paused until it is re-analyzed.
+        </p>
+      )}
     </div>
   );
 }

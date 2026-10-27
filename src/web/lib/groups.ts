@@ -1,5 +1,6 @@
 import { fnv1a8 } from '../../core/hash';
 import { FILES_WITHOUT_DIFF_TITLE } from '../../core/group/types';
+import type { Progress } from './progress';
 import type { Analysis, AnalysisGroup, Hunk } from '../types';
 
 /** Which grouping the main pane shows. 'file' is the M1 all-files view. */
@@ -90,11 +91,18 @@ export function riskBadge(
   return { label: 'LOW', tone: 'low' };
 }
 
-/** One line for the narrow-screen group selector: risk badge, title and count. */
+/**
+ * One line for the narrow-screen group selector: risk badge, title and count. With `progress`,
+ * a finished group gets a leading check and the rest show done/total in place of the count.
+ */
 export function groupOptionLabel(
   g: Pick<AnalysisGroup, 'risk' | 'autoClear' | 'unclassified' | 'title' | 'hunkIds' | 'files'>,
+  progress?: Pick<Progress, 'done' | 'total' | 'complete'>,
 ): string {
-  return `${riskBadge(g).label} · ${g.title} (${railCount(g)})`;
+  if (!progress) return `${riskBadge(g).label} · ${g.title} (${railCount(g)})`;
+  const done = progress.complete && progress.total > 0;
+  const count = done ? railCount(g) : `${progress.done}/${progress.total}`;
+  return `${done ? '✓ ' : ''}${riskBadge(g).label} · ${g.title} (${count})`;
 }
 
 /** FNV-1a (32-bit) of a string as 8 hex chars (shared with the server's verify-check keys). */
@@ -114,6 +122,30 @@ export function parseVerifyId(
 ): { groupKey: string; index: number; hash: string } | null {
   const m = /^(.+):(\d+):([0-9a-f]{8})$/.exec(id);
   return m ? { groupKey: m[1]!, index: Number(m[2]), hash: m[3]! } : null;
+}
+
+/**
+ * What `PUT /api/verify` stores for a verify id: the text hash rides along in the group key
+ * (`${groupKey}#${hash}`) so the backend stays unchanged, and a checkmark saved for one text is
+ * never read back for a different text at the same index.
+ */
+export function verifyWireArgs(id: string): { groupKey: string; itemIndex: number } | null {
+  const p = parseVerifyId(id);
+  return p ? { groupKey: `${p.groupKey}#${p.hash}`, itemIndex: p.index } : null;
+}
+
+/**
+ * Verify ids for the `verifyChecks` map of GET /api/review-state. Entries stored without a text
+ * hash (before text-keyed ids) cannot be tied to a text, so they are dropped.
+ */
+export function verifyIdsFromWire(checks: Record<string, number[]>): string[] {
+  const out: string[] = [];
+  for (const [key, indexes] of Object.entries(checks)) {
+    const m = /^(.+)#([0-9a-f]{8})$/.exec(key);
+    if (!m) continue;
+    for (const i of indexes) out.push(`${m[1]}:${i}:${m[2]}`);
+  }
+  return out;
 }
 
 /** Number of hunks that actually exist in the PR (stale ids are ignored). */
