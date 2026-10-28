@@ -92,15 +92,38 @@ describe('store review state', () => {
     expect(s.listVerifyChecks(other)).toEqual([]);
   });
 
-  it('reports the head of the latest review activity', async () => {
+  it('derives the review baseline from checkpoints and submitted reviews, not hunk marks', async () => {
     const s = openStore(':memory:');
-    expect(s.getLastReviewedHeadSha(ref)).toBeUndefined();
+    expect(s.getReviewBaselineHeadSha(ref)).toBeUndefined();
+    // No checkpoint or review: the earliest mark, and later marks do not advance it.
     s.markReviewed(ref, ['h1'], 'sha1');
-    expect(s.getLastReviewedHeadSha(ref)).toBe('sha1');
+    expect(s.getReviewBaselineHeadSha(ref)).toBe('sha1');
     await new Promise((r) => setTimeout(r, 5));
-    s.recordSubmittedReview(ref, { headSha: 'sha2', event: 'COMMENT', githubReviewId: 1 });
-    expect(s.getLastReviewedHeadSha(ref)).toBe('sha2');
-    expect(s.getLastReviewedHeadSha(other)).toBeUndefined();
+    s.markReviewed(ref, ['h2'], 'sha2');
+    expect(s.getReviewBaselineHeadSha(ref)).toBe('sha1');
+    await new Promise((r) => setTimeout(r, 5));
+    s.setReviewCheckpoint(ref, 'sha2');
+    expect(s.getReviewBaselineHeadSha(ref)).toBe('sha2');
+    await new Promise((r) => setTimeout(r, 5));
+    s.markReviewed(ref, ['h3'], 'sha3');
+    expect(s.getReviewBaselineHeadSha(ref)).toBe('sha2');
+    await new Promise((r) => setTimeout(r, 5));
+    s.recordSubmittedReview(ref, { headSha: 'sha3', event: 'COMMENT', githubReviewId: 1 });
+    expect(s.getReviewBaselineHeadSha(ref)).toBe('sha3');
+    expect(s.getReviewBaselineHeadSha(other)).toBeUndefined();
+  });
+
+  it('keeps the first-mark baseline when that hunk is unmarked after a push', async () => {
+    const s = openStore(':memory:');
+    s.markReviewed(ref, ['x'], 'shaA');
+    await new Promise((r) => setTimeout(r, 5));
+    // Head B arrives: unmark X, then mark a hunk on B. Nothing chose "Done reviewing".
+    s.unmarkReviewed(ref, ['x']);
+    s.markReviewed(ref, ['y'], 'shaB');
+    expect(s.getReviewBaselineHeadSha(ref)).toBe('shaA');
+    // Even with no marks left at all.
+    s.unmarkReviewed(ref, ['y']);
+    expect(s.getReviewBaselineHeadSha(ref)).toBe('shaA');
   });
 
   it('keeps anchors, and moves or outdates drafts', () => {

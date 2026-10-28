@@ -1,5 +1,7 @@
 import { useMemo } from 'react';
+import { itemsLabel } from '../lib/reviewItems';
 import type { DiffSection } from '../lib/sections';
+import { useReviewState, useVisibleSections } from '../reviewState';
 import { useReview } from '../state';
 import { fileAnchorId, FileDiff } from './FileDiff';
 
@@ -37,5 +39,32 @@ export function AllFilesDiff() {
     () => files.map((file) => ({ file, hunks: file.hunks, anchorId: fileAnchorId(file.path) })),
     [files],
   );
-  return <HunkList sections={sections} />;
+  const visible = useVisibleSections(sections);
+  if (visible.length === 0 && sections.length > 0) return <AllReviewed sections={sections} />;
+  return <HunkList sections={visible} />;
+}
+
+export function countHunks(sections: DiffSection[]): number {
+  return sections.reduce((n, s) => n + s.hunks.length, 0);
+}
+
+/** Shown instead of the diff when "Hide reviewed hunks" leaves nothing to read. */
+export function AllReviewed({ sections }: { sections: DiffSection[] }) {
+  const { setHideReviewed } = useReviewState();
+  const hunks = countHunks(sections);
+  const files = sections.length - sections.filter((s) => s.hunks.length > 0).length;
+  const count = hunks + files;
+  return (
+    <div className="rounded border border-green-300 bg-green-50 p-3 text-sm text-green-900 dark:border-green-800 dark:bg-green-950/50 dark:text-green-200">
+      All {count} {itemsLabel(count, hunks > 0, files > 0)} {count === 1 ? 'is' : 'are'} reviewed
+      and hidden.{' '}
+      <button
+        type="button"
+        className="text-blue-600 hover:underline dark:text-blue-400"
+        onClick={() => setHideReviewed(false)}
+      >
+        Show reviewed
+      </button>
+    </div>
+  );
 }

@@ -98,10 +98,13 @@ export interface Store {
   setVerifyCheck(ref: PrRef, groupKey: string, itemIndex: number, checked: boolean): void;
   listVerifyChecks(ref: PrRef): VerifyCheck[];
   /**
-   * Head SHA of the user's most recent review activity: the newest of a hunk being marked
-   * reviewed and a review being submitted.
+   * The head the reviewer is caught up to, which the re-review banner compares from: the newest
+   * of an explicit checkpoint and a submitted review. With neither, the head of the earliest
+   * reviewed-hunk mark. Marking hunks never advances it.
    */
-  getLastReviewedHeadSha(ref: PrRef): string | undefined;
+  getReviewBaselineHeadSha(ref: PrRef): string | undefined;
+  /** Records that the reviewer is caught up to `headSha` ("Done reviewing these changes"). */
+  setReviewCheckpoint(ref: PrRef, headSha: string): void;
   recordSubmittedReview(ref: PrRef, rec: SubmittedReviewRecord): void;
   close(): void;
 }
@@ -214,12 +217,19 @@ export function openStore(file: string): Store {
   >(
     'SELECT group_key, item_index, checked FROM verify_checks WHERE repo = ? AND pr = ? ORDER BY group_key, item_index',
   );
-  const lastReviewed = db.prepare<[string, number, string, number], { head_sha: string }>(
+  const baseline = db.prepare<[string, number, string, number], { head_sha: string }>(
     `SELECT head_sha FROM (
-       SELECT head_sha, reviewed_at AS at FROM reviewed_hunks WHERE repo = ? AND pr = ?
+       SELECT head_sha, created_at AS at FROM review_checkpoints WHERE repo = ? AND pr = ?
        UNION ALL
        SELECT head_sha, submitted_at AS at FROM reviews_submitted WHERE repo = ? AND pr = ?
      ) ORDER BY at DESC LIMIT 1`,
+  );
+  const firstMark = db.prepare<[string, number], { head_sha: string }>(
+    `SELECT head_sha FROM reviewed_hunks WHERE repo = ? AND pr = ?
+     ORDER BY reviewed_at, rowid LIMIT 1`,
+  );
+  const insertCheckpoint = db.prepare(
+    'INSERT INTO review_checkpoints (repo, pr, head_sha, created_at) VALUES (?, ?, ?, ?)',
   );
   const insertReview = db.prepare(`
     INSERT INTO reviews_submitted (repo, pr, head_sha, github_review_id, event, submitted_at)
@@ -338,6 +348,13 @@ export function openStore(file: string): Store {
       const repo = `${ref.owner}/${ref.repo}`;
       const at = new Date().toISOString();
       db.transaction(() => {
+        // The first mark pins the re-review baseline as a checkpoint, so later unmarking that
+        // hunk can't move it; after this only a submission or an explicit checkpoint does.
+        // (Seeded from the earliest existing mark for state written before checkpoints.)
+        if (hunkIds.length > 0 && !baseline.get(repo, ref.number, repo, ref.number)) {
+          const seed = firstMark.get(repo, ref.number)?.head_sha ?? headSha;
+          insertCheckpoint.run(repo, ref.number, seed, at);
+        }
         for (const id of hunkIds) markStmt.run(repo, ref.number, id, at, headSha);
       })();
     },
@@ -364,9 +381,20 @@ export function openStore(file: string): Store {
         checked: r.checked !== 0,
       }));
     },
-    getLastReviewedHeadSha(ref) {
+    getReviewBaselineHeadSha(ref) {
       const repo = `${ref.owner}/${ref.repo}`;
-      return lastReviewed.get(repo, ref.number, repo, ref.number)?.head_sha;
+      return (
+        baseline.get(repo, ref.number, repo, ref.number)?.head_sha ??
+        firstMark.get(repo, ref.number)?.head_sha
+      );
+    },
+    setReviewCheckpoint(ref, headSha) {
+      insertCheckpoint.run(
+        `${ref.owner}/${ref.repo}`,
+        ref.number,
+        headSha,
+        new Date().toISOString(),
+      );
     },
     recordSubmittedReview(ref, rec) {
       insertReview.run(

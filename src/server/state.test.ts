@@ -57,7 +57,7 @@ describe('review state routes', () => {
     expect([...s.reviewedHunkIds].sort()).toEqual([a, b].sort());
     expect(s.reviewedAt[a!]).toMatchObject({ headSha: HEAD });
     expect(typeof s.reviewedAt[a!].reviewedAt).toBe('string');
-    expect(s.lastReviewedHeadSha).toBe(HEAD);
+    expect(s.reviewBaselineHeadSha).toBe(HEAD);
 
     await call('PUT', '/api/reviewed', { hunkIds: [a], reviewed: false, ...at });
     s = (await call('GET', '/api/review-state')).json;
@@ -133,7 +133,7 @@ describe('PUT /api/reviewed validation', () => {
     });
     expect(store.listReviewed(pr).map((x) => x.hunkId)).toEqual([hunkIds[0]]);
     const inter = (await call('GET', '/api/interdiff')).json;
-    expect(inter.lastReviewedHeadSha).toBe('older-head');
+    expect(inter.reviewBaselineHeadSha).toBe('older-head');
     const un = await call('PUT', '/api/reviewed', {
       hunkIds: [hunkIds[0]],
       reviewed: false,
@@ -206,7 +206,7 @@ describe('GET /api/interdiff', () => {
     const { call } = setup();
     const r = await call('GET', '/api/interdiff');
     expect(r.json).toMatchObject({
-      lastReviewedHeadSha: null,
+      reviewBaselineHeadSha: null,
       currentHeadSha: HEAD,
       newCommits: [],
       changedFiles: [],
@@ -226,7 +226,7 @@ describe('GET /api/interdiff', () => {
     const r = await call('GET', '/api/interdiff');
     expect(github.calls.compare).toEqual([{ base: 'old-head', head: HEAD }]);
     expect(r.json).toEqual({
-      lastReviewedHeadSha: 'old-head',
+      reviewBaselineHeadSha: 'old-head',
       currentHeadSha: HEAD,
       newCommits: github.compare.commits,
       changedFiles: ['src/greet.ts'],
@@ -262,7 +262,7 @@ describe('GET /api/interdiff', () => {
     github.compare = undefined;
     const r = await call('GET', '/api/interdiff');
     expect(r.json).toMatchObject({
-      lastReviewedHeadSha: 'gone',
+      reviewBaselineHeadSha: 'gone',
       compareAvailable: false,
       newCommits: [],
       changedFiles: [],
@@ -276,6 +276,84 @@ describe('GET /api/interdiff', () => {
     const r = await call('GET', '/api/interdiff');
     expect(github.calls.compare).toEqual([]);
     expect(r.json).toMatchObject({ compareAvailable: true, newCommits: [] });
+  });
+});
+
+describe('re-review baseline', () => {
+  async function pushTo(
+    { call, github }: ReturnType<typeof setup>,
+    head: string,
+  ): Promise<{ headSha: string; diffHash: string }> {
+    github.setHead(head);
+    const d = (await call('GET', '/api/pr?refresh=1')).json;
+    return { headSha: d.pr.headSha, diffHash: d.diffHash };
+  }
+  const baseline = async (call: ReturnType<typeof setup>['call']) => ({
+    state: (await call('GET', '/api/review-state')).json.reviewBaselineHeadSha,
+    inter: (await call('GET', '/api/interdiff')).json.reviewBaselineHeadSha,
+  });
+
+  it('keeps the baseline at A when one hunk is marked on B', async () => {
+    const t = setup();
+    const { call, github } = t;
+    await call('GET', '/api/pr');
+    await call('PUT', '/api/reviewed', { hunkIds: [hunkIds[0]], reviewed: true, ...at });
+    const b = await pushTo(t, HEAD2);
+    expect(
+      (await call('PUT', '/api/reviewed', { hunkIds: [hunkIds[1]], reviewed: true, ...b })).status,
+    ).toBe(200);
+    // A fresh request ("reload") still compares from A.
+    expect(await baseline(call)).toEqual({ state: HEAD, inter: HEAD });
+    expect(github.calls.compare.at(-1)).toEqual({ base: HEAD, head: HEAD2 });
+  });
+
+  it('keeps the baseline at A after unmarking the only A hunk and marking on B', async () => {
+    const t = setup();
+    const { call, github } = t;
+    const a = { headSha: HEAD, diffHash: (await call('GET', '/api/pr')).json.diffHash };
+    await call('PUT', '/api/reviewed', { hunkIds: [hunkIds[0]], reviewed: true, ...a });
+    const b = await pushTo(t, HEAD2);
+    await call('PUT', '/api/reviewed', { hunkIds: [hunkIds[0]], reviewed: false, ...b });
+    await call('PUT', '/api/reviewed', { hunkIds: [hunkIds[1]], reviewed: true, ...b });
+    expect(await baseline(call)).toEqual({ state: HEAD, inter: HEAD });
+    expect(github.calls.compare.at(-1)).toEqual({ base: HEAD, head: HEAD2 });
+  });
+
+  it('moves the baseline to the head named by a checkpoint', async () => {
+    const t = setup();
+    const { call } = t;
+    await call('GET', '/api/pr');
+    await call('PUT', '/api/reviewed', { hunkIds: [hunkIds[0]], reviewed: true, ...at });
+    const b = await pushTo(t, HEAD2);
+    const r = await call('POST', '/api/review-checkpoint', b);
+    expect(r.status).toBe(200);
+    expect(r.json).toEqual({ ok: true, reviewBaselineHeadSha: HEAD2 });
+    expect(await baseline(call)).toEqual({ state: HEAD2, inter: HEAD2 });
+  });
+
+  it('refuses a checkpoint for a stale head and records nothing', async () => {
+    const t = setup();
+    const { call, store } = t;
+    await call('GET', '/api/pr');
+    await pushTo(t, HEAD2);
+    const r = await call('POST', '/api/review-checkpoint', at);
+    expect(r.status).toBe(409);
+    expect(r.json).toMatchObject({ code: 'head_moved', currentHeadSha: HEAD2 });
+    expect(store.getReviewBaselineHeadSha(pr)).toBeUndefined();
+    expect((await call('POST', '/api/review-checkpoint', { headSha: HEAD2 })).status).toBe(400);
+  });
+
+  it('without a checkpoint uses the earliest mark: marks at A and B, head C gives A', async () => {
+    const t = setup();
+    const { call } = t;
+    const HEAD3 = '4444444444444444444444444444444444444444';
+    await call('GET', '/api/pr');
+    await call('PUT', '/api/reviewed', { hunkIds: [hunkIds[0]], reviewed: true, ...at });
+    await new Promise((r) => setTimeout(r, 5));
+    const b = await pushTo(t, HEAD2);
+    await call('PUT', '/api/reviewed', { hunkIds: [hunkIds[1]], reviewed: true, ...b });
+    await pushTo(t, HEAD3);
+    expect(await baseline(call)).toEqual({ state: HEAD, inter: HEAD });
   });
 });
 

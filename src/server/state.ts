@@ -1,4 +1,4 @@
-import type { Hono } from 'hono';
+import type { Context, Hono } from 'hono';
 import { z } from 'zod';
 import type { GitHubClient, PrCommit } from '../core/github/types.js';
 import type { PrData } from '../core/pr-data.js';
@@ -30,6 +30,8 @@ const reviewedSchema = z.object({
   reviewed: z.boolean(),
 });
 
+const checkpointSchema = reviewedSchema.pick({ headSha: true, diffHash: true });
+
 const verifySchema = z.object({
   groupKey: z.string().min(1),
   itemIndex: z.number().int().nonnegative(),
@@ -50,8 +52,11 @@ interface RouteDeps {
 }
 
 export interface InterdiffResponse {
-  /** Head the user last reviewed at; null when they have not reviewed anything yet. */
-  lastReviewedHeadSha: string | null;
+  /**
+   * Head the reviewer is caught up to (see `Store.getReviewBaselineHeadSha`); null before any
+   * review activity. Marking hunks does not move it.
+   */
+  reviewBaselineHeadSha: string | null;
   currentHeadSha: string;
   newCommits: PrCommit[];
   changedFiles: string[];
@@ -75,6 +80,25 @@ export interface InterdiffResponse {
 export function registerStateApi(app: Hono, deps: RouteDeps): void {
   const { pr: ref, github, store, getData } = deps;
 
+  /** A 409 head_moved response when the client's head or diff is not the current one. */
+  function headMoved(
+    c: Context,
+    data: PrData,
+    headSha: string,
+    diffHash: string,
+  ): Response | undefined {
+    if (headSha === data.pr.headSha && diffHash === data.diffHash) return undefined;
+    return c.json(
+      {
+        error: 'The pull request changed since it was loaded',
+        code: 'head_moved',
+        currentHeadSha: data.pr.headSha,
+        currentDiffHash: data.diffHash,
+      },
+      409,
+    );
+  }
+
   app.get('/api/review-state', (c) => {
     const reviewed = store.listReviewed(ref);
     const verifyChecks: Record<string, { index: number; itemHash: string }[]> = {};
@@ -84,14 +108,14 @@ export function registerStateApi(app: Hono, deps: RouteDeps): void {
       if (!v.checked || !m) continue;
       (verifyChecks[m[1]!] ??= []).push({ index: v.itemIndex, itemHash: m[2]! });
     }
-    const last = store.getLastReviewedHeadSha(ref);
+    const last = store.getReviewBaselineHeadSha(ref);
     return c.json({
       reviewedHunkIds: reviewed.map((r) => r.hunkId),
       reviewedAt: Object.fromEntries(
         reviewed.map((r) => [r.hunkId, { reviewedAt: r.reviewedAt, headSha: r.headSha }]),
       ),
       verifyChecks,
-      ...(last ? { lastReviewedHeadSha: last } : {}),
+      ...(last ? { reviewBaselineHeadSha: last } : {}),
     });
   });
 
@@ -100,17 +124,8 @@ export function registerStateApi(app: Hono, deps: RouteDeps): void {
     if ('error' in body) return c.json({ error: body.error }, 400);
     const { hunkIds, reviewed, headSha, diffHash } = body.data;
     const data = await getData();
-    if (headSha !== data.pr.headSha || diffHash !== data.diffHash) {
-      return c.json(
-        {
-          error: 'The pull request changed since it was loaded',
-          code: 'head_moved',
-          currentHeadSha: data.pr.headSha,
-          currentDiffHash: data.diffHash,
-        },
-        409,
-      );
-    }
+    const moved = headMoved(c, data, headSha, diffHash);
+    if (moved) return moved;
     if (reviewed) {
       const known = new Set(reviewItemIds(data.files, data.pr.headSha));
       const unknown = hunkIds.filter((id) => !known.has(id));
@@ -124,6 +139,16 @@ export function registerStateApi(app: Hono, deps: RouteDeps): void {
     return c.json({ ok: true });
   });
 
+  app.post('/api/review-checkpoint', async (c) => {
+    const body = await parseBody(c, checkpointSchema);
+    if ('error' in body) return c.json({ error: body.error }, 400);
+    const data = await getData();
+    const moved = headMoved(c, data, body.data.headSha, body.data.diffHash);
+    if (moved) return moved;
+    store.setReviewCheckpoint(ref, data.pr.headSha);
+    return c.json({ ok: true, reviewBaselineHeadSha: data.pr.headSha });
+  });
+
   app.put('/api/verify', async (c) => {
     const body = await parseBody(c, verifySchema);
     if ('error' in body) return c.json({ error: body.error }, 400);
@@ -135,7 +160,7 @@ export function registerStateApi(app: Hono, deps: RouteDeps): void {
   app.get('/api/interdiff', async (c) => {
     const data = await getData(c.req.query('refresh') === '1');
     const currentHeadSha = data.pr.headSha;
-    const last = store.getLastReviewedHeadSha(ref);
+    const last = store.getReviewBaselineHeadSha(ref);
     const reviewed = new Set(store.listReviewed(ref).map((r) => r.hunkId));
     const newHunkIds = data.files
       .flatMap((f) => f.hunks)
@@ -143,7 +168,7 @@ export function registerStateApi(app: Hono, deps: RouteDeps): void {
       .filter((id) => !reviewed.has(id));
 
     const out: InterdiffResponse = {
-      lastReviewedHeadSha: last ?? null,
+      reviewBaselineHeadSha: last ?? null,
       currentHeadSha,
       newCommits: [],
       changedFiles: [],

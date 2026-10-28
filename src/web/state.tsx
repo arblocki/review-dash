@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { api, jsonBody } from './api';
 import { sourceLines } from './lib/diffModel';
+import { refreshInOrder } from './lib/refreshOrder';
 import { createDraftSync, type UnsyncedDraft } from './lib/draftSync';
 import type {
   Draft,
@@ -217,7 +218,13 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const [data] = await Promise.all([api<PrResponse>('/api/pr?refresh=1'), loadThreads()]);
+      // Drafts are re-read too: the server re-anchors them (or marks them outdated) on a new head,
+      // so that read must come after the refresh has made the server adopt it.
+      const data = await refreshInOrder({
+        fetchPr: () => api<PrResponse>('/api/pr?refresh=1'),
+        loadThreads,
+        loadDrafts,
+      });
       fileCache.current.clear();
       setLoaded((l) => (l ? { ...l, data } : l));
       setRefreshError(null);
@@ -226,7 +233,7 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
     } finally {
       setRefreshing(false);
     }
-  }, [loadThreads]);
+  }, [loadThreads, loadDrafts]);
 
   const dismissRefreshError = useCallback(() => setRefreshError(null), []);
 
@@ -270,6 +277,7 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
         ...(hunkId ? { hunkId } : {}),
         body: '',
         headSha,
+        outdated: false,
         status: 'new',
         persisted: false,
       };

@@ -53,6 +53,7 @@ function setup() {
         headSha: 'abc',
         status: 'new',
         persisted: false,
+        outdated: false,
       },
     ];
   };

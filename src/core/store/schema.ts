@@ -69,4 +69,15 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE drafts ADD COLUMN anchor_start_index INTEGER;
   ALTER TABLE drafts ADD COLUMN anchor_text TEXT;
   `,
+  // Re-review baseline: "Done reviewing these changes" records the head the reviewer is caught up to.
+  `
+  CREATE TABLE review_checkpoints (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo       TEXT NOT NULL,
+    pr         INTEGER NOT NULL,
+    head_sha   TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX review_checkpoints_by_pr ON review_checkpoints (repo, pr);
+  `,
 ];
