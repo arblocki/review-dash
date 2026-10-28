@@ -8,10 +8,11 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { api, jsonBody } from './api';
+import { api, jsonBody, prUrl } from './api';
 import { sourceLines } from './lib/diffModel';
 import { refreshInOrder } from './lib/refreshOrder';
 import { createDraftSync, type UnsyncedDraft } from './lib/draftSync';
+import { pullsHref } from './lib/route';
 import type {
   Draft,
   LineRange,
@@ -145,7 +146,10 @@ type Loaded = {
   data: PrResponse;
 };
 
-export function ReviewProvider({ children }: { children: ReactNode }) {
+export function ReviewProvider(props: { session: SessionInfo; children: ReactNode }) {
+  const { children } = props;
+  // The PR is fixed for the page's lifetime; keep the first object so effects don't re-run.
+  const [session] = useState(props.session);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [threads, setThreads] = useState<ReviewThread[]>([]);
@@ -167,13 +171,17 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
     setDraftsState(draftsRef.current);
   }, []);
   const sync = useMemo(
-    () => createDraftSync(api, { get: () => draftsRef.current, update: mutateDrafts }),
+    () =>
+      createDraftSync((path, init) => api(prUrl(path), init), {
+        get: () => draftsRef.current,
+        update: mutateDrafts,
+      }),
     [mutateDrafts],
   );
 
   const loadThreads = useCallback(async () => {
     try {
-      const res = await api<{ threads: ReviewThread[] }>('/api/threads');
+      const res = await api<{ threads: ReviewThread[] }>(prUrl('/threads'));
       setThreads(res.threads);
       setThreadsError(null);
     } catch (err) {
@@ -182,7 +190,7 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadDrafts = useCallback(async () => {
-    const res = await api<{ drafts: Draft[] }>('/api/drafts');
+    const res = await api<{ drafts: Draft[] }>(prUrl('/drafts'));
     const server: LocalDraft[] = res.drafts.map((d) => {
       const local: LocalDraft & { updatedAt?: string } = { ...d, status: 'saved', persisted: true };
       delete local.updatedAt;
@@ -199,17 +207,16 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
   const loadAll = useCallback(async () => {
     setError(null);
     try {
-      const [session, data] = await Promise.all([
-        api<SessionInfo>('/api/session'),
-        api<PrResponse>('/api/pr'),
+      const [data] = await Promise.all([
+        api<PrResponse>(prUrl('/pr')),
         loadThreads(),
         loadDrafts(),
-      ]).then(([s, d]) => [s, d] as const);
+      ]);
       setLoaded({ session, data });
     } catch (err) {
       setError((err as Error).message);
     }
-  }, [loadThreads, loadDrafts]);
+  }, [session, loadThreads, loadDrafts]);
 
   useEffect(() => {
     void loadAll();
@@ -221,7 +228,7 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
       // Drafts are re-read too: the server re-anchors them (or marks them outdated) on a new head,
       // so that read must come after the refresh has made the server adopt it.
       const data = await refreshInOrder({
-        fetchPr: () => api<PrResponse>('/api/pr?refresh=1'),
+        fetchPr: () => api<PrResponse>(prUrl('/pr?refresh=1')),
         loadThreads,
         loadDrafts,
       });
@@ -242,7 +249,7 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
     let p = fileCache.current.get(key);
     if (!p) {
       p = api<{ content: string }>(
-        `/api/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(ref)}`,
+        prUrl(`/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(ref)}`),
       ).then((r) => sourceLines(r.content));
       fileCache.current.set(key, p);
       p.catch(() => fileCache.current.delete(key));
@@ -298,7 +305,7 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
   const replyToThread = useCallback<ReviewContextValue['replyToThread']>(async (thread, body) => {
     const root = thread.comments[0]?.databaseId;
     if (!root) throw new Error('This thread cannot be replied to from here.');
-    const res = await api<{ id: number; url: string }>(`/api/threads/${root}/replies`, {
+    const res = await api<{ id: number; url: string }>(prUrl(`/threads/${root}/replies`), {
       method: 'POST',
       ...jsonBody({ body }),
     });
@@ -381,13 +388,21 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
     return (
       <div className="mx-auto max-w-xl p-8">
         <p className="text-red-600 dark:text-red-400">Failed to load: {error}</p>
-        <button
-          type="button"
-          className="mt-3 rounded border border-gray-300 px-3 py-1 text-sm dark:border-gray-600"
-          onClick={() => void loadAll()}
-        >
-          Retry
-        </button>
+        <div className="mt-3 flex items-center gap-3">
+          <button
+            type="button"
+            className="rounded border border-gray-300 px-3 py-1 text-sm dark:border-gray-600"
+            onClick={() => void loadAll()}
+          >
+            Retry
+          </button>
+          <a
+            href={pullsHref(session.pr)}
+            className="text-sm text-blue-600 hover:underline dark:text-blue-400"
+          >
+            Open pull requests
+          </a>
+        </div>
       </div>
     );
   }

@@ -1,4 +1,5 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { pullsHref } from '../lib/route';
 import { useDraftCount, useReview } from '../state';
 
 const btn =
@@ -17,7 +18,9 @@ export function Header({ onSubmit, extra }: { onSubmit: () => void; extra?: Reac
     setViewType,
     hideWhitespace,
     setHideWhitespace,
+    flushDrafts,
   } = useReview();
+  const [leaving, setLeaving] = useState(false);
   const draftCount = useDraftCount();
   const ref = useRef<HTMLDivElement>(null);
 
@@ -75,6 +78,30 @@ export function Header({ onSubmit, extra }: { onSubmit: () => void; extra?: Reac
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
+            <a
+              href={pullsHref(session.pr)}
+              className="shrink-0 text-sm text-blue-600 hover:underline dark:text-blue-400"
+              title="All open pull requests"
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                // Save pending drafts before the page goes away.
+                e.preventDefault();
+                if (leaving) return;
+                setLeaving(true);
+                void flushDrafts()
+                  .then((unsynced) => {
+                    const ok =
+                      unsynced.length === 0 ||
+                      confirm(
+                        `${unsynced.length} draft comment(s) could not be saved and will be lost. Leave anyway?`,
+                      );
+                    if (ok) location.search = pullsHref(session.pr);
+                  })
+                  .finally(() => setLeaving(false));
+              }}
+            >
+              ← PRs
+            </a>
             <span className="shrink-0 font-mono text-sm text-gray-500 dark:text-gray-400">
               {session.pr.owner}/{session.pr.repo} #{session.pr.number}
             </span>

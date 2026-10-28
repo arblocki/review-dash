@@ -2,6 +2,7 @@ import type { Draft, LocalDraft } from '../types';
 
 export const AUTOSAVE_MS = 700;
 
+/** Calls the API of the PR under review; `path` is relative to it (`/drafts`). */
 type ApiFn = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 /** Where the drafts live; state.tsx backs this with a ref plus React state. */
@@ -70,7 +71,7 @@ export function createDraftSync(api: ApiFn, store: DraftStore, opts: { autosaveM
       try {
         if (clearing) {
           try {
-            await api(`/api/drafts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            await api(`/drafts/${encodeURIComponent(id)}`, { method: 'DELETE' });
           } catch (err) {
             if (!isNotFound(err)) throw err;
           }
@@ -82,7 +83,7 @@ export function createDraftSync(api: ApiFn, store: DraftStore, opts: { autosaveM
           if (cur) patch(id, { persisted: false, status: cur.body === sent ? 'new' : 'dirty' });
           return;
         }
-        await api<{ draft: Draft }>('/api/drafts', {
+        await api<{ draft: Draft }>('/drafts', {
           method: 'PUT',
           body: JSON.stringify({
             id,
@@ -123,7 +124,7 @@ export function createDraftSync(api: ApiFn, store: DraftStore, opts: { autosaveM
     if (pending) await pending.catch(() => undefined);
     if (!d || !(d.persisted || pending)) return;
     try {
-      await api(`/api/drafts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      await api(`/drafts/${encodeURIComponent(id)}`, { method: 'DELETE' });
     } catch (err) {
       if (isNotFound(err)) return; // already gone
       const body = find(id)?.body ?? d.body;

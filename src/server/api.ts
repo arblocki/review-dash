@@ -39,6 +39,12 @@ const reviewSchema = z.object({
 
 const replySchema = z.object({ body: z.string().trim().min(1) });
 
+/** Body for a failed GitHub call: only the message and upstream status, never headers or tokens. */
+export function upstreamError(err: Error): { error: string; upstreamStatus?: number } {
+  const status = (err as { status?: unknown }).status;
+  return { error: err.message, ...(typeof status === 'number' ? { upstreamStatus: status } : {}) };
+}
+
 export interface ApiDeps {
   pr: PrRef;
   github: GitHubClient;
@@ -69,15 +75,7 @@ export function registerApi(app: Hono, { pr: ref, github, store, analysis }: Api
         err.status as 409 | 422,
       );
     }
-    const status = (err as { status?: unknown }).status;
-    // Never echo request headers or tokens: only the message and upstream status.
-    return c.json(
-      {
-        error: err.message,
-        ...(typeof status === 'number' ? { upstreamStatus: status } : {}),
-      },
-      502,
-    );
+    return c.json(upstreamError(err), 502);
   });
 
   app.get('/api/pr', async (c) => {

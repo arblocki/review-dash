@@ -6,7 +6,7 @@ import { createGitHubClient, createOctokitClients } from '../core/github/client.
 import { resolveToken } from '../core/github/token.js';
 import { createProvider, loadConfig } from '../core/llm/index.js';
 import { openStore } from '../core/store/index.js';
-import { formatPrRef } from '../core/pr-ref.js';
+import { formatPrRef, formatRepoRef } from '../core/pr-ref.js';
 import type { AnalysisDeps } from '../server/analysis.js';
 import { startServer } from '../server/index.js';
 import { parseCli, UsageError, USAGE } from './args.js';
@@ -36,9 +36,22 @@ async function main(): Promise<void> {
     createProvider: (sel) => createProvider(config, sel),
     trustPrConfig: opts.trustPrConfig,
   };
-  const server = await startServer({ pr: opts.pr, port: opts.port, github, store, analysis });
+  const server = await startServer({
+    repo: opts.repo,
+    initialPr: opts.pr,
+    port: opts.port,
+    github,
+    store,
+    analysis,
+  });
   const url = `http://127.0.0.1:${server.port}/#token=${server.token}`;
-  console.log(`Reviewing ${formatPrRef(opts.pr)}`);
+  console.log(
+    !opts.repo
+      ? 'Listing your repositories'
+      : opts.pr === undefined
+        ? `Listing open pull requests in ${formatRepoRef(opts.repo)}`
+        : `Reviewing ${formatPrRef({ ...opts.repo, number: opts.pr })}`,
+  );
   if (opts.open) {
     console.log(`Opening http://127.0.0.1:${server.port}/ (session token not shown)`);
     await open(url);

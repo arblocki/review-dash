@@ -2,11 +2,27 @@ import type { ParsedFile, Side } from '../core/diff/types';
 import type { PrMeta, ReviewEvent } from '../core/github/types';
 
 export type { Hunk, DiffLine, ParsedFile, Side, LineRange } from '../core/diff/types';
-export type { PrMeta, ReviewThread, ThreadComment, ReviewEvent } from '../core/github/types';
+export type {
+  PrMeta,
+  PrSummary,
+  RepoSummary,
+  ReviewThread,
+  ThreadComment,
+  ReviewEvent,
+} from '../core/github/types';
+export type { PrRef, RepoRef } from '../core/pr-ref';
 
+/** The PR a review page is showing. */
 export interface SessionInfo {
   label: string;
   pr: { owner: string; repo: string; number: number };
+}
+
+/** GET /api/session: the repository and PR the server was started with, if any. */
+export interface AppSession {
+  label: string;
+  repo: { owner: string; repo: string } | null;
+  pr: { owner: string; repo: string; number: number } | null;
 }
 
 export interface PrResponse {

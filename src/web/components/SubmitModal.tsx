@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ApiError, api, jsonBody } from '../api';
+import { ApiError, api, jsonBody, prUrl } from '../api';
 import { classifyDraft } from '../lib/diffModel';
 import type { UnsyncedDraft } from '../lib/draftSync';
 import { runSubmit } from '../lib/submitFlow';
@@ -99,7 +99,7 @@ export function SubmitModal({ onClose }: { onClose: () => void }) {
       const outcome = await runSubmit({
         flush: flushDrafts,
         post: () =>
-          api<SubmitResult>('/api/review', {
+          api<SubmitResult>(prUrl('/review'), {
             method: 'POST',
             // The head we are showing; the server refuses with head_moved if GitHub has moved on.
             ...jsonBody({ event, body, headSha: pr.headSha, ...(force ? { force: true } : {}) }),

@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { api, selectPr } from './api';
 import { AnalysisProvider, useAnalysis } from './analysis';
 import { hideWhitespaceOnly } from './lib/diffModel';
 import { sectionItemIds } from './lib/reviewFilter';
@@ -27,7 +28,11 @@ import { SubmitModal } from './components/SubmitModal';
 import { groupNeighbors, orderGroups, pickGroup, resolveView, type ViewMode } from './lib/groups';
 import { mainPaneState } from './lib/mainPane';
 import { fileThreadOwners } from './lib/sections';
+import { PrPicker } from './components/PrPicker';
+import { RepoPicker } from './components/RepoPicker';
+import { routeFromSearch } from './lib/route';
 import { ReviewProvider, useReview } from './state';
+import type { AppSession } from './types';
 
 function Review() {
   const { files, threadsError, hideWhitespace, refreshing, refresh } = useReview();
@@ -221,9 +226,44 @@ function Review() {
   );
 }
 
+/**
+ * Shows the repository list, a repo's open PRs, or one PR's review, picked from the URL (see
+ * routeFromSearch). Moving between them is a page load, so no state carries over between PRs.
+ */
 export function App() {
+  const [session, setSession] = useState<AppSession | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setError(null);
+    api<AppSession>('/api/session').then(setSession, (err: Error) => setError(err.message));
+  }, []);
+  useEffect(load, [load]);
+
+  if (error) {
+    return (
+      <div className="mx-auto max-w-xl p-8">
+        <p className="text-red-600 dark:text-red-400">Failed to load: {error}</p>
+        <button
+          type="button"
+          className="mt-3 rounded border border-gray-300 px-3 py-1 text-sm dark:border-gray-600"
+          onClick={load}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+  if (!session) return <p className="p-8 text-gray-500 dark:text-gray-400">Loading…</p>;
+
+  const route = routeFromSearch(location.search, session);
+  if (route.kind === 'repos') return <RepoPicker />;
+  if (route.kind === 'pulls') return <PrPicker repo={route.repo} />;
+
+  const { pr } = route;
+  selectPr(pr);
   return (
-    <ReviewProvider>
+    <ReviewProvider session={{ pr, label: `${pr.owner}/${pr.repo}#${pr.number}` }}>
       <AnalysisProvider>
         <ReviewStateProvider>
           <Review />
