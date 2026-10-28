@@ -348,6 +348,13 @@ export function openStore(file: string): Store {
       const repo = `${ref.owner}/${ref.repo}`;
       const at = new Date().toISOString();
       db.transaction(() => {
+        // The first mark pins the re-review baseline as a checkpoint, so later unmarking that
+        // hunk can't move it; after this only a submission or an explicit checkpoint does.
+        // (Seeded from the earliest existing mark for state written before checkpoints.)
+        if (hunkIds.length > 0 && !baseline.get(repo, ref.number, repo, ref.number)) {
+          const seed = firstMark.get(repo, ref.number)?.head_sha ?? headSha;
+          insertCheckpoint.run(repo, ref.number, seed, at);
+        }
         for (const id of hunkIds) markStmt.run(repo, ref.number, id, at, headSha);
       })();
     },

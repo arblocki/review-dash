@@ -307,6 +307,18 @@ describe('re-review baseline', () => {
     expect(github.calls.compare.at(-1)).toEqual({ base: HEAD, head: HEAD2 });
   });
 
+  it('keeps the baseline at A after unmarking the only A hunk and marking on B', async () => {
+    const t = setup();
+    const { call, github } = t;
+    const a = { headSha: HEAD, diffHash: (await call('GET', '/api/pr')).json.diffHash };
+    await call('PUT', '/api/reviewed', { hunkIds: [hunkIds[0]], reviewed: true, ...a });
+    const b = await pushTo(t, HEAD2);
+    await call('PUT', '/api/reviewed', { hunkIds: [hunkIds[0]], reviewed: false, ...b });
+    await call('PUT', '/api/reviewed', { hunkIds: [hunkIds[1]], reviewed: true, ...b });
+    expect(await baseline(call)).toEqual({ state: HEAD, inter: HEAD });
+    expect(github.calls.compare.at(-1)).toEqual({ base: HEAD, head: HEAD2 });
+  });
+
   it('moves the baseline to the head named by a checkpoint', async () => {
     const t = setup();
     const { call } = t;

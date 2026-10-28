@@ -113,6 +113,19 @@ describe('store review state', () => {
     expect(s.getReviewBaselineHeadSha(other)).toBeUndefined();
   });
 
+  it('keeps the first-mark baseline when that hunk is unmarked after a push', async () => {
+    const s = openStore(':memory:');
+    s.markReviewed(ref, ['x'], 'shaA');
+    await new Promise((r) => setTimeout(r, 5));
+    // Head B arrives: unmark X, then mark a hunk on B. Nothing chose "Done reviewing".
+    s.unmarkReviewed(ref, ['x']);
+    s.markReviewed(ref, ['y'], 'shaB');
+    expect(s.getReviewBaselineHeadSha(ref)).toBe('shaA');
+    // Even with no marks left at all.
+    s.unmarkReviewed(ref, ['y']);
+    expect(s.getReviewBaselineHeadSha(ref)).toBe('shaA');
+  });
+
   it('keeps anchors, and moves or outdates drafts', () => {
     const s = openStore(':memory:');
     const d = s.upsertDraft(ref, {
